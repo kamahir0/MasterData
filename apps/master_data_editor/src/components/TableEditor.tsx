@@ -1,0 +1,1405 @@
+import { AlertCircle, ChevronDown, ChevronRight, GripVertical, Link2, Plus, Table2, Tags, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import clsx from "clsx";
+import { coerceValue, useEditorStore } from "../store";
+import {
+  availableTypeOptionGroups,
+  cloneMasterValue,
+  createField,
+  duplicateMessagePackKeys,
+  duplicatePrimaryKeys,
+  formatValue,
+  matchesTagRule,
+  messagePackKey,
+  moveFieldToGap,
+  moveFieldToIndex,
+  removeFieldName,
+  replaceFieldName
+} from "../editorUtils";
+import type { DefinitionDocument, FieldDefinition, MasterRefDefinition, MasterValue, RowDefinition, StructDefinition, TableDefinition } from "../types";
+import { EditorHeader } from "./EditorHost";
+import { TagTokenInput, uniqueTags } from "./TagTokenInput";
+
+const ROW_NUMBER_WIDTH = 64;
+const META_TAGS_WIDTH = 180;
+const FIELD_WIDTH = 190;
+const ROW_HEIGHT = 34;
+
+type VisibleRow = { row: RowDefinition; originalIndex: number; filteredOut: boolean };
+type GridField = number | "tags";
+type ActiveCell = { visibleRowIndex: number; field: GridField };
+type ActiveCellState = ActiveCell & { mode: "select" | "edit" };
+type SelectedStructCell = {
+  fieldIndex: number;
+  originalIndex: number;
+  typeName: string;
+  visibleRowIndex: number;
+};
+type PopoverPosition = { left: number; top: number };
+
+export function TableEditor({ document }: { document: DefinitionDocument }) {
+  const table = document.definition as TableDefinition & { kind: "table" };
+  const rows = useFilteredRows(table);
+
+  return (
+    <div className="table-editor">
+      <EditorHeader document={document} showFilters />
+      <TableSettingsFoldout document={document} table={table} />
+      <RecordsGrid document={document} table={table} rows={rows} />
+    </div>
+  );
+}
+
+function TableSettingsFoldout({ document, table }: { document: DefinitionDocument; table: TableDefinition }) {
+  const { documents, updateDocument } = useEditorStore();
+  const [open, setOpen] = useState(false);
+  const tableDocuments = useMemo(
+    () =>
+      Object.values(documents).filter(
+        (item): item is DefinitionDocument & { definition: TableDefinition & { kind: "table" } } =>
+          item.definition.kind === "table"
+      ),
+    [documents]
+  );
+  const fields = table.fields.map((field) => field.name);
+
+  const updatePrimary = (nextFields: string[]) => {
+    updateDocument(document.relativePath, "Edit primary key", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      draft.definition.keys.primary.fields = nextFields;
+    });
+  };
+
+  const updateSecondary = (index: number, recipe: (key: { fields: string[]; unique?: boolean }) => void) => {
+    updateDocument(document.relativePath, "Edit secondary key", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const key = draft.definition.keys.secondary?.[index];
+      if (key) recipe(key);
+    });
+  };
+
+  const addSecondary = () => {
+    updateDocument(document.relativePath, "Add secondary key", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      draft.definition.keys.secondary ??= [];
+      draft.definition.keys.secondary.push({ fields: [draft.definition.fields[0]?.name ?? ""], unique: true });
+    });
+  };
+
+  const deleteSecondary = (index: number) => {
+    updateDocument(document.relativePath, "Delete secondary key", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      draft.definition.keys.secondary?.splice(index, 1);
+    });
+  };
+
+  const addRef = () => {
+    const target = tableDocuments[0]?.definition;
+    if (!target) return;
+    const targetFields = target.keys.primary.fields;
+    updateDocument(document.relativePath, "Add MasterRef", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const draftTable = draft.definition;
+      draftTable.refs ??= [];
+      draftTable.refs.push({
+        name: uniqueRefName(draftTable, `${target.table}Ref`),
+        target: target.typeName,
+        targetKey: { primary: true, fields: [] },
+        fields: targetFields.map((targetField) => ({
+          local: localFieldForTarget(draftTable.fields, targetField),
+          target: targetField
+        }))
+      });
+    });
+  };
+
+  return (
+    <section className="table-settings">
+      <button className="table-settings-toggle" onClick={() => setOpen(!open)}>
+        {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        Table Settings
+      </button>
+      {open && (
+        <div className="table-settings-body">
+          <div className="table-settings-section">
+            <div className="settings-section-title compact-title">
+              <h3>Primary Key</h3>
+            </div>
+            <KeyFieldsEditor availableFields={fields} fields={table.keys.primary.fields} onChange={updatePrimary} />
+          </div>
+
+          <div className="table-settings-section">
+            <div className="settings-section-title compact-title">
+              <h3>Secondary Keys</h3>
+              <button className="secondary-button compact" onClick={addSecondary}>
+                <Plus size={14} />
+                Add
+              </button>
+            </div>
+            <div className="secondary-key-list">
+              {(table.keys.secondary ?? []).map((key, index) => (
+                <div className="secondary-key-row" key={index}>
+                  <label className="check-row">
+                    <input
+                      checked={key.unique ?? true}
+                      type="checkbox"
+                      onChange={(event) => updateSecondary(index, (target) => void (target.unique = event.target.checked))}
+                    />
+                    Unique
+                  </label>
+                  <KeyFieldsEditor
+                    availableFields={fields}
+                    fields={key.fields}
+                    onChange={(nextFields) => updateSecondary(index, (target) => void (target.fields = nextFields))}
+                  />
+                  <button className="icon-button danger-icon" title="Delete secondary key" onClick={() => deleteSecondary(index)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              {(table.keys.secondary ?? []).length === 0 && <span className="muted">No secondary keys.</span>}
+            </div>
+          </div>
+
+          <div className="table-settings-section">
+            <div className="settings-section-title compact-title">
+              <h3>MasterRef</h3>
+              <button className="secondary-button compact" disabled={tableDocuments.length === 0} onClick={addRef}>
+                <Link2 size={14} />
+                Add
+              </button>
+            </div>
+            <div className="master-ref-list">
+              {(table.refs ?? []).map((reference, index) => (
+                <MasterRefEditor
+                  document={document}
+                  key={`${reference.name}-${index}`}
+                  reference={reference}
+                  refIndex={index}
+                  table={table}
+                  tableDocuments={tableDocuments}
+                />
+              ))}
+              {(table.refs ?? []).length === 0 && <span className="muted">No MasterRef definitions.</span>}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function KeyFieldsEditor({
+  availableFields,
+  fields,
+  onChange
+}: {
+  availableFields: string[];
+  fields: string[];
+  onChange: (fields: string[]) => void;
+}) {
+  const setField = (index: number, value: string) => onChange(fields.map((field, fieldIndex) => (fieldIndex === index ? value : field)));
+  const move = (index: number, delta: number) => {
+    const nextIndex = index + delta;
+    if (nextIndex < 0 || nextIndex >= fields.length) return;
+    const next = [...fields];
+    const [field] = next.splice(index, 1);
+    next.splice(nextIndex, 0, field);
+    onChange(next);
+  };
+
+  return (
+    <div className="key-fields-editor">
+      {fields.map((field, index) => (
+        <div className="key-field-row" key={`${field}-${index}`}>
+          <select value={field} onChange={(event) => setField(index, event.target.value)}>
+            {availableFields.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate}
+              </option>
+            ))}
+          </select>
+          <button className="icon-button" disabled={index === 0} title="Move up" onClick={() => move(index, -1)}>
+            ↑
+          </button>
+          <button className="icon-button" disabled={index === fields.length - 1} title="Move down" onClick={() => move(index, 1)}>
+            ↓
+          </button>
+          <button className="icon-button danger-icon" disabled={fields.length <= 1} title="Remove field" onClick={() => onChange(fields.filter((_, fieldIndex) => fieldIndex !== index))}>
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ))}
+      <button className="secondary-button compact" disabled={availableFields.length === 0} onClick={() => onChange([...fields, availableFields[0]])}>
+        <Plus size={13} />
+        Field
+      </button>
+    </div>
+  );
+}
+
+function MasterRefEditor({
+  document,
+  reference,
+  refIndex,
+  table,
+  tableDocuments
+}: {
+  document: DefinitionDocument;
+  reference: MasterRefDefinition;
+  refIndex: number;
+  table: TableDefinition;
+  tableDocuments: Array<DefinitionDocument & { definition: TableDefinition & { kind: "table" } }>;
+}) {
+  const { updateDocument } = useEditorStore();
+  const targetDocument = tableDocuments.find((item) => item.definition.typeName === reference.target) ?? tableDocuments[0];
+  const keyOptions = targetDocument ? targetKeyOptions(targetDocument.definition) : [];
+  const selectedKey = selectedTargetKeyId(reference, keyOptions);
+
+  const updateRef = (recipe: (reference: MasterRefDefinition, draftTable: TableDefinition) => void) => {
+    updateDocument(document.relativePath, "Edit MasterRef", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const target = draft.definition.refs?.[refIndex];
+      if (target) recipe(target, draft.definition);
+    });
+  };
+
+  const applyTarget = (targetTypeName: string) => {
+    const nextTarget = tableDocuments.find((item) => item.definition.typeName === targetTypeName)?.definition;
+    if (!nextTarget) return;
+    const key = targetKeyOptions(nextTarget)[0];
+    updateRef((target) => {
+      target.target = nextTarget.typeName;
+      target.targetKey = key.targetKey;
+      target.fields = key.fields.map((targetField) => ({
+        local: localFieldForTarget(table.fields, targetField),
+        target: targetField
+      }));
+    });
+  };
+
+  const applyTargetKey = (keyId: string) => {
+    const option = keyOptions.find((item) => item.id === keyId);
+    if (!option) return;
+    updateRef((target) => {
+      target.targetKey = option.targetKey;
+      target.fields = option.fields.map((targetField) => ({
+        local: target.fields.find((mapping) => mapping.target === targetField)?.local ?? localFieldForTarget(table.fields, targetField),
+        target: targetField
+      }));
+    });
+  };
+
+  const deleteRef = () => {
+    updateDocument(document.relativePath, "Delete MasterRef", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      draft.definition.refs?.splice(refIndex, 1);
+    });
+  };
+
+  return (
+    <div className="master-ref-row">
+      <input value={reference.name} onChange={(event) => updateRef((target) => void (target.name = event.target.value))} />
+      <select value={targetDocument?.definition.typeName ?? ""} onChange={(event) => applyTarget(event.target.value)}>
+        {tableDocuments.map((item) => (
+          <option key={item.definition.typeName} value={item.definition.typeName}>
+            {item.definition.typeName}
+          </option>
+        ))}
+      </select>
+      <select value={selectedKey} onChange={(event) => applyTargetKey(event.target.value)}>
+        {keyOptions.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <div className="ref-mapping-list">
+        {reference.fields.map((mapping, mappingIndex) => (
+          <label className="ref-mapping-row" key={`${mapping.target}-${mappingIndex}`}>
+            <span>{mapping.target}</span>
+            <select
+              value={mapping.local}
+              onChange={(event) =>
+                updateRef((target) => {
+                  target.fields[mappingIndex].local = event.target.value;
+                })
+              }
+            >
+              {table.fields.map((field) => (
+                <option key={field.name} value={field.name}>
+                  {field.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+      <button className="icon-button danger-icon" title="Delete MasterRef" onClick={deleteRef}>
+        <Trash2 size={14} />
+      </button>
+    </div>
+  );
+}
+
+function targetKeyOptions(table: TableDefinition) {
+  return [
+    {
+      id: "primary",
+      label: `Primary (${table.keys.primary.fields.join(", ")})`,
+      fields: table.keys.primary.fields,
+      targetKey: { primary: true, fields: [] }
+    },
+    ...(table.keys.secondary ?? []).map((key, index) => ({
+      id: `secondary:${index}`,
+      label: `Secondary ${index + 1}${key.unique === false ? " non-unique" : " unique"} (${key.fields.join(", ")})`,
+      fields: key.fields,
+      targetKey: { primary: false, fields: [...key.fields] }
+    }))
+  ];
+}
+
+function selectedTargetKeyId(reference: MasterRefDefinition, options: ReturnType<typeof targetKeyOptions>) {
+  if (reference.targetKey.primary) return "primary";
+  const found = options.find((option) => sameFields(option.fields, reference.targetKey.fields ?? []));
+  return found?.id ?? options[0]?.id ?? "";
+}
+
+function sameFields(left: string[], right: string[]) {
+  return left.length === right.length && left.every((field, index) => field === right[index]);
+}
+
+function localFieldForTarget(fields: FieldDefinition[], targetField: string) {
+  return fields.find((field) => field.name === targetField)?.name ?? fields[0]?.name ?? "";
+}
+
+function uniqueRefName(table: TableDefinition, preferredName: string) {
+  const names = new Set([...(table.refs ?? []).map((reference) => reference.name), ...table.fields.map((field) => field.name)]);
+  if (!names.has(preferredName)) return preferredName;
+  for (let index = 2; ; index += 1) {
+    const candidate = `${preferredName}${index}`;
+    if (!names.has(candidate)) return candidate;
+  }
+}
+
+function RecordsGrid({
+  document,
+  rows,
+  table
+}: {
+  document: DefinitionDocument;
+  rows: VisibleRow[];
+  table: TableDefinition;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { addRow, deleteRow, documents, project, updateCell, updateDocument, zoom } = useEditorStore();
+  const rowHeight = scaledSize(ROW_HEIGHT, zoom);
+  const rowVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 12
+  });
+  const gridTemplateColumns = useMemo(() => gridColumns(table.fields.length, zoom), [table.fields.length, zoom]);
+  const primaryFields = new Set(table.keys.primary.fields);
+  const secondaryFields = new Set((table.keys.secondary ?? []).flatMap((key) => key.fields));
+  const refFields = new Set((table.refs ?? []).flatMap((ref) => ref.fields.map((field) => field.local)));
+  const duplicateKeys = useMemo(() => duplicatePrimaryKeys(table), [table]);
+  const duplicateKeyIndexes = useMemo(() => duplicateMessagePackKeys(table.fields), [table.fields]);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; index: number }>();
+  const [activeCell, setActiveCell] = useState<ActiveCellState>();
+  const [structCell, setStructCell] = useState<SelectedStructCell>();
+  const [popoverPosition, setPopoverPosition] = useState<PopoverPosition>();
+  const structDefinitions = useMemo(() => structDefinitionMap(documents), [documents]);
+  const availableTags = project?.availableTags ?? [];
+  const rowTagSuggestions = useMemo(
+    () => uniqueTags([...availableTags, ...table.rows.flatMap((row) => row.meta?.tags ?? [])]),
+    [availableTags, table.rows]
+  );
+  const allowCustomRowTags = availableTags.length === 0;
+  const drag = useGapDrag(scrollRef, (from, gap) => {
+    updateDocument(document.relativePath, "Reorder field", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      moveFieldToGap(draft.definition.fields, from, gap);
+    });
+  });
+
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [rowHeight, rowVirtualizer]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(undefined);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [contextMenu]);
+
+  const onWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.shiftKey || !scrollRef.current) return;
+    scrollRef.current.scrollLeft += event.deltaY;
+  };
+
+  const updatePopoverPosition = () => {
+    if (!structCell) return;
+    const grid = scrollRef.current?.querySelector<HTMLElement>(".master-grid");
+    const target = scrollRef.current?.querySelector<HTMLElement>(
+      `[data-grid-cell-row="${structCell.visibleRowIndex}"][data-grid-cell-field="${structCell.fieldIndex}"]`
+    );
+    if (!grid || !target) {
+      setPopoverPosition(undefined);
+      return;
+    }
+    const gridRect = grid.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    setPopoverPosition({
+      left: targetRect.left - gridRect.left,
+      top: targetRect.top - gridRect.top
+    });
+  };
+
+  useEffect(() => {
+    updatePopoverPosition();
+    if (!structCell || !scrollRef.current) return;
+    const onScroll = () => window.requestAnimationFrame(updatePopoverPosition);
+    const onResize = () => window.requestAnimationFrame(updatePopoverPosition);
+    const scrollElement = scrollRef.current;
+    scrollElement.addEventListener("scroll", onScroll);
+    window.addEventListener("resize", onResize);
+    return () => {
+      scrollElement.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [structCell, rows]);
+
+  useEffect(() => {
+    if (!structCell) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setStructCell(undefined);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [structCell]);
+
+  const reorderColumn = (from: number, to: number) => {
+    if (from < 0 || to < 0 || from === to) return;
+    updateDocument(document.relativePath, "Reorder field", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      moveFieldToIndex(draft.definition.fields, from, to);
+    });
+  };
+
+  const insertColumn = (index: number, side: "left" | "right") => {
+    updateDocument(document.relativePath, "Insert field", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const insertIndex = side === "left" ? index : index + 1;
+      const field = createField(draft.definition.fields, `Field${draft.definition.fields.length + 1}`, "string");
+      draft.definition.fields.splice(insertIndex, 0, field);
+      for (const row of draft.definition.rows) row.data[field.name] = "";
+    });
+  };
+
+  const duplicateColumn = (index: number) => {
+    updateDocument(document.relativePath, "Duplicate field", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const source = draft.definition.fields[index];
+      if (!source) return;
+      const field = createField(draft.definition.fields, `${source.name}Copy`, source.type);
+      draft.definition.fields.splice(index + 1, 0, field);
+      for (const row of draft.definition.rows) row.data[field.name] = cloneMasterValue(row.data[source.name]);
+    });
+  };
+
+  const deleteColumn = (index: number) => {
+    const field = table.fields[index];
+    if (!field || !window.confirm(`Delete field ${field.name}?`)) return;
+    updateDocument(document.relativePath, `Delete field ${field.name}`, (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const [removed] = draft.definition.fields.splice(index, 1);
+      if (!removed) return;
+      for (const row of draft.definition.rows) delete row.data[removed.name];
+      removeFieldName(draft.definition.keys.primary.fields, removed.name);
+      for (const key of draft.definition.keys.secondary ?? []) removeFieldName(key.fields, removed.name);
+      for (const ref of draft.definition.refs ?? []) {
+        ref.fields = ref.fields.filter((mapping) => mapping.local !== removed.name);
+      }
+    });
+  };
+
+  const editMessagePackKey = (index: number) => {
+    const field = table.fields[index];
+    if (!field) return;
+    if (!window.confirm("Changing MessagePack Key can break binary compatibility. Continue?")) return;
+    const raw = window.prompt("MessagePack Key", String(messagePackKey(field, index)));
+    if (raw == null) return;
+    const next = Number.parseInt(raw, 10);
+    if (!Number.isInteger(next) || next < 0) return;
+    updateDocument(document.relativePath, `Edit ${field.name} MessagePack Key`, (draft) => {
+      if (draft.definition.kind !== "table") return;
+      draft.definition.fields[index].fixedIndex = next;
+    });
+  };
+
+  const openColumnMenu = (event: React.MouseEvent, index: number) => {
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY, index });
+  };
+
+  const renameField = (index: number, nextName: string) => {
+    const oldName = table.fields[index].name;
+    updateDocument(document.relativePath, `Rename field ${oldName}`, (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const field = draft.definition.fields[index];
+      field.name = nextName;
+      for (const row of draft.definition.rows) {
+        if (Object.prototype.hasOwnProperty.call(row.data, oldName)) {
+          row.data[nextName] = row.data[oldName];
+          delete row.data[oldName];
+        }
+      }
+      replaceFieldName(draft.definition.keys.primary.fields, oldName, nextName);
+      for (const key of draft.definition.keys.secondary ?? []) replaceFieldName(key.fields, oldName, nextName);
+      for (const ref of draft.definition.refs ?? []) {
+        for (const mapping of ref.fields) {
+          if (mapping.local === oldName) mapping.local = nextName;
+        }
+      }
+    });
+  };
+
+  const addField = () => {
+    updateDocument(document.relativePath, "Add field", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const field = createField(draft.definition.fields, `Field${draft.definition.fields.length + 1}`, "string");
+      draft.definition.fields.push(field);
+      for (const row of draft.definition.rows) row.data[field.name] = "";
+    });
+  };
+
+  const handlePaste = (event: React.ClipboardEvent<HTMLInputElement>, rowIndex: number, fieldIndex: number) => {
+    const text = event.clipboardData.getData("text/plain");
+    if (!text.includes("\t") && !text.includes("\n")) return;
+    event.preventDefault();
+    const lines = text
+      .trimEnd()
+      .split(/\r?\n/)
+      .map((line) => line.split("\t"));
+    updateDocument(document.relativePath, "Paste cells", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      for (let y = 0; y < lines.length; y += 1) {
+        const targetRow = draft.definition.rows[rowIndex + y];
+        if (!targetRow) continue;
+        for (let x = 0; x < lines[y].length; x += 1) {
+          const field = draft.definition.fields[fieldIndex + x];
+          if (!field) continue;
+          targetRow.data[field.name] = coerceValue(field.type, lines[y][x]);
+        }
+      }
+    });
+  };
+
+  const setActiveGridCell = (visibleRowIndex: number, field: GridField, mode: ActiveCellState["mode"]) => {
+    const cell = { visibleRowIndex, field, mode };
+    setActiveCell(cell);
+    if (field === "tags") {
+      setStructCell(undefined);
+      return;
+    }
+    const entry = rows[visibleRowIndex];
+    const fieldDefinition = table.fields[field];
+    if (entry && fieldDefinition && structDefinitions[fieldDefinition.type]) {
+      setStructCell({ fieldIndex: field, originalIndex: entry.originalIndex, typeName: fieldDefinition.type, visibleRowIndex });
+      return;
+    }
+    setStructCell(undefined);
+  };
+
+  const focusGridCell = (visibleRowIndex: number, field: GridField, edit = false) => {
+    setActiveGridCell(visibleRowIndex, field, edit ? "edit" : "select");
+    rowVirtualizer.scrollToIndex(visibleRowIndex, { align: "auto" });
+    window.setTimeout(() => {
+      const target = scrollRef.current?.querySelector<HTMLElement>(
+        `[data-grid-cell-row="${visibleRowIndex}"][data-grid-cell-field="${field}"]`
+      );
+      if (!target) return;
+      if (edit) {
+        const input = target.querySelector<HTMLInputElement>("input");
+        input?.focus();
+        input?.select();
+      } else {
+        target.focus();
+      }
+    }, 0);
+  };
+
+  const beginEditingCell = (visibleRowIndex: number, field: GridField) => {
+    focusGridCell(visibleRowIndex, field, true);
+  };
+
+  const focusRelativeGridInput = (visibleRowIndex: number, field: GridField, rowDelta: number, columnDelta: number) => {
+    const columnCount = table.fields.length + 1;
+    const currentColumn = gridFieldToColumn(field);
+    let nextVisibleRowIndex = visibleRowIndex + rowDelta;
+    let nextColumn = currentColumn + columnDelta;
+    if (columnDelta > 0 && nextColumn >= columnCount) {
+      if (visibleRowIndex < rows.length - 1) {
+        nextVisibleRowIndex = visibleRowIndex + 1;
+        nextColumn = 0;
+      } else {
+        nextVisibleRowIndex = visibleRowIndex;
+        nextColumn = columnCount - 1;
+      }
+    }
+    if (columnDelta < 0 && nextColumn < 0) {
+      if (visibleRowIndex > 0) {
+        nextVisibleRowIndex = visibleRowIndex - 1;
+        nextColumn = columnCount - 1;
+      } else {
+        nextVisibleRowIndex = visibleRowIndex;
+        nextColumn = 0;
+      }
+    }
+    nextVisibleRowIndex = clamp(nextVisibleRowIndex, 0, rows.length - 1);
+    nextColumn = clamp(nextColumn, 0, columnCount - 1);
+    focusGridCell(nextVisibleRowIndex, columnToGridField(nextColumn));
+  };
+
+  const handleSelectedCellKeyDown = (event: React.KeyboardEvent<HTMLElement>, visibleRowIndex: number, field: GridField) => {
+    const key = event.key;
+    if (key === "Tab") {
+      event.preventDefault();
+      focusRelativeGridInput(visibleRowIndex, field, 0, event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (key === "Enter") {
+      event.preventDefault();
+      if (event.shiftKey) focusRelativeGridInput(visibleRowIndex, field, -1, 0);
+      else beginEditingCell(visibleRowIndex, field);
+      return;
+    }
+    if (key === "F2") {
+      event.preventDefault();
+      beginEditingCell(visibleRowIndex, field);
+      return;
+    }
+    if (key === "ArrowUp") {
+      event.preventDefault();
+      focusRelativeGridInput(visibleRowIndex, field, -1, 0);
+      return;
+    }
+    if (key === "ArrowDown") {
+      event.preventDefault();
+      focusRelativeGridInput(visibleRowIndex, field, 1, 0);
+      return;
+    }
+    if (key === "ArrowLeft") {
+      event.preventDefault();
+      focusRelativeGridInput(visibleRowIndex, field, 0, -1);
+      return;
+    }
+    if (key !== "ArrowRight") return;
+    event.preventDefault();
+    focusRelativeGridInput(visibleRowIndex, field, 0, 1);
+  };
+
+  const handleEditingInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, visibleRowIndex: number, field: GridField) => {
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      focusGridCell(visibleRowIndex, field);
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      focusRelativeGridInput(visibleRowIndex, field, 0, event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    focusRelativeGridInput(visibleRowIndex, field, event.shiftKey ? -1 : 1, 0);
+  };
+
+  const handleTagEditingKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, visibleRowIndex: number) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      focusGridCell(visibleRowIndex, "tags");
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      focusRelativeGridInput(visibleRowIndex, "tags", 0, event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusRelativeGridInput(visibleRowIndex, "tags", -1, 0);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "Enter") {
+      event.preventDefault();
+      focusRelativeGridInput(visibleRowIndex, "tags", event.shiftKey ? -1 : 1, 0);
+    }
+  };
+
+  return (
+    <section className="records-panel">
+      <div className="section-heading records-heading">
+        <Table2 size={15} />
+        Records
+        <span>
+          {rows.filter((entry) => !entry.filteredOut).length} / {table.rows.length}
+        </span>
+        <button className="secondary-button compact" onClick={() => addRow(document.relativePath)}>
+          Add Row
+        </button>
+        <button className="secondary-button compact" onClick={addField}>
+          Add Field
+        </button>
+      </div>
+      <div className="records-grid" ref={scrollRef} onWheel={onWheel}>
+        <div className="master-grid" style={{ minWidth: totalGridWidth(table.fields.length, zoom) }}>
+          <div className="grid-header" style={{ gridTemplateColumns }}>
+            <div className="row-head">#</div>
+            <div className="meta-head">
+              <Tags size={13} />
+              <span>tags</span>
+            </div>
+            {table.fields.map((field, index) => (
+              <div
+                className={clsx("grid-col-head", primaryFields.has(field.name) && "primary-col", secondaryFields.has(field.name) && "secondary-col")}
+                data-field-index={index}
+                key={field.name}
+                onContextMenu={(event) => openColumnMenu(event, index)}
+              >
+                <div className="col-head-title">
+                  <button className="drag-handle column-drag-handle" onPointerDown={(event) => drag.start(index, event)} title="Drag to reorder field">
+                    <GripVertical size={13} />
+                  </button>
+                  <span className={clsx("badge key", duplicateKeyIndexes.has(messagePackKey(field, index)) && "duplicate")}>
+                    Key {messagePackKey(field, index)}
+                  </span>
+                  {primaryFields.has(field.name) && <span className="badge primary">PK</span>}
+                  {secondaryFields.has(field.name) && <span className="badge secondary">SK</span>}
+                  {refFields.has(field.name) && <span className="badge ref">REF</span>}
+                </div>
+                <input
+                  className="column-name-input"
+                  value={field.name}
+                  onChange={(event) => renameField(index, event.target.value)}
+                  onPointerDown={(event) => event.stopPropagation()}
+                />
+                <select
+                  className="column-type-select"
+                  value={field.type}
+                  onChange={(event) =>
+                    updateDocument(document.relativePath, `Change ${field.name} type`, (draft) => {
+                      if (draft.definition.kind !== "table") return;
+                      draft.definition.fields[index].type = event.target.value;
+                    })
+                  }
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  {availableTypeOptionGroups(documents, field.type).map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+          {drag.state && <div className="gap-marker records-gap-marker" style={{ left: drag.state.left }} />}
+          {contextMenu && (
+            <ColumnContextMenu
+              canMoveLeft={contextMenu.index > 0}
+              canMoveRight={contextMenu.index < table.fields.length - 1}
+              onDelete={() => deleteColumn(contextMenu.index)}
+              onDuplicate={() => duplicateColumn(contextMenu.index)}
+              onEditKey={() => editMessagePackKey(contextMenu.index)}
+              onInsertLeft={() => insertColumn(contextMenu.index, "left")}
+              onInsertRight={() => insertColumn(contextMenu.index, "right")}
+              onMoveFirst={() => reorderColumn(contextMenu.index, 0)}
+              onMoveLast={() => reorderColumn(contextMenu.index, table.fields.length - 1)}
+              onMoveLeft={() => reorderColumn(contextMenu.index, contextMenu.index - 1)}
+              onMoveRight={() => reorderColumn(contextMenu.index, contextMenu.index + 1)}
+              x={contextMenu.x}
+              y={contextMenu.y}
+            />
+          )}
+          <div className="virtual-canvas" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const entry = rows[virtualRow.index];
+              if (!entry) return null;
+              const row = entry.row;
+              const rowTags = row.meta?.tags ?? [];
+              const tagCell: ActiveCell = { visibleRowIndex: virtualRow.index, field: "tags" };
+              const isTagActive = sameCell(activeCell, tagCell);
+              const isTagEditing = isTagActive && activeCell?.mode === "edit";
+              const primaryKey = table.keys.primary.fields.map((field) => String(row.data[field] ?? "")).join("|");
+              const hasDuplicatePrimaryKey = duplicateKeys.has(primaryKey);
+              return (
+                <div
+                  className={clsx("grid-row", entry.filteredOut && "profile-filtered")}
+                  key={virtualRow.key}
+                  style={{
+                    transform: `translateY(${virtualRow.start}px)`,
+                    gridTemplateColumns,
+                    height: rowHeight
+                  }}
+                >
+                  <div className={clsx("row-head", hasDuplicatePrimaryKey && "row-error")}>
+                    <span>{entry.originalIndex + 1}</span>
+                    {hasDuplicatePrimaryKey && (
+                      <span className="row-error-marker" title={`Duplicate primary key: ${primaryKey || "(empty)"}`}>
+                        <AlertCircle size={13} />
+                      </span>
+                    )}
+                    <button title="Delete row" onClick={() => deleteRow(document.relativePath, entry.originalIndex)}>
+                      x
+                    </button>
+                  </div>
+                  <div
+                    className={clsx("tag-cell", "grid-cell-shell", isTagActive && "selected", isTagEditing && "editing")}
+                    data-grid-cell-field="tags"
+                    data-grid-cell-row={virtualRow.index}
+                    tabIndex={0}
+                    onDoubleClick={() => beginEditingCell(virtualRow.index, "tags")}
+                    onFocus={() => {
+                      setActiveGridCell(virtualRow.index, "tags", isTagEditing ? "edit" : "select");
+                      setStructCell(undefined);
+                    }}
+                    onKeyDown={(event) => handleSelectedCellKeyDown(event, virtualRow.index, "tags")}
+                    onMouseDown={(event) => {
+                      if (event.target === event.currentTarget) focusGridCell(virtualRow.index, "tags");
+                    }}
+                  >
+                    {isTagEditing ? (
+                      <TagTokenInput
+                        allowCustom={allowCustomRowTags}
+                        className="tag-cell-editor"
+                        dataGridField="tags"
+                        dataGridRow={virtualRow.index}
+                        placeholder="untagged"
+                        suggestions={rowTagSuggestions}
+                        value={rowTags}
+                        onNavigateKeyDown={(event) => handleTagEditingKeyDown(event, virtualRow.index)}
+                        onFocus={() => setStructCell(undefined)}
+                        onChange={(tags) =>
+                          updateDocument(document.relativePath, "Edit row tags", (draft) => {
+                            if (draft.definition.kind !== "table") return;
+                            draft.definition.rows[entry.originalIndex].meta = tags.length > 0 ? { tags } : undefined;
+                          })
+                        }
+                      />
+                    ) : (
+                      <button
+                        className="tag-cell-display"
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          beginEditingCell(virtualRow.index, "tags");
+                        }}
+                      >
+                        {rowTags.length === 0 ? (
+                          <span className="tag-placeholder">untagged</span>
+                        ) : (
+                          rowTags.map((tag) => (
+                            <span className="tag-token readonly" key={tag}>
+                              {tag}
+                            </span>
+                          ))
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  {table.fields.map((field, fieldIndex) => {
+                    const cell: ActiveCell = { visibleRowIndex: virtualRow.index, field: fieldIndex };
+                    const isSelected = sameCell(activeCell, cell);
+                    const isEditing = isSelected && activeCell?.mode === "edit";
+                    const enumInfo = enumInfoForType(documents, field.type);
+                    return (
+                      <div
+                        key={field.name}
+                        className={clsx(
+                          "grid-cell",
+                          "grid-cell-shell",
+                          primaryFields.has(field.name) && "primary-col",
+                          secondaryFields.has(field.name) && "secondary-col",
+                          isSelected && "selected",
+                          isEditing && "editing"
+                        )}
+                        data-grid-cell-field={fieldIndex}
+                        data-grid-cell-row={virtualRow.index}
+                        tabIndex={0}
+                        onDoubleClick={() => beginEditingCell(virtualRow.index, fieldIndex)}
+                        onFocus={() => setActiveGridCell(virtualRow.index, fieldIndex, isEditing ? "edit" : "select")}
+                        onKeyDown={(event) => handleSelectedCellKeyDown(event, virtualRow.index, fieldIndex)}
+                        onMouseDown={(event) => {
+                          if (event.target === event.currentTarget) focusGridCell(virtualRow.index, fieldIndex);
+                        }}
+                      >
+                        {isEditing ? (
+                          enumInfo ? (
+                            <EnumCellInput
+                              dataGridField={fieldIndex}
+                              dataGridRow={virtualRow.index}
+                              flags={enumInfo.flags}
+                              options={enumInfo.members}
+                              value={formatValue(row.data[field.name])}
+                              onChange={(value) => updateCell(document.relativePath, entry.originalIndex, field.name, value)}
+                              onFocus={() => {
+                                setActiveGridCell(virtualRow.index, fieldIndex, "edit");
+                              }}
+                              onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
+                            />
+                          ) : (
+                            <input
+                              className="grid-cell-input"
+                              data-grid-field={fieldIndex}
+                              data-grid-row={virtualRow.index}
+                              value={formatValue(row.data[field.name])}
+                              onFocus={() => {
+                                setActiveGridCell(virtualRow.index, fieldIndex, "edit");
+                              }}
+                              onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
+                              onPaste={(event) => handlePaste(event, entry.originalIndex, fieldIndex)}
+                              onChange={(event) =>
+                                updateCell(document.relativePath, entry.originalIndex, field.name, coerceValue(field.type, event.target.value))
+                              }
+                            />
+                          )
+                        ) : (
+                          <button
+                            className="grid-cell-display"
+                            type="button"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              beginEditingCell(virtualRow.index, fieldIndex);
+                            }}
+                          >
+                            <span>{formatValue(row.data[field.name])}</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+          {structCell && popoverPosition && (
+            <StructCellPopover
+              document={document}
+              field={table.fields[structCell.fieldIndex]}
+              onClose={() => setStructCell(undefined)}
+              position={popoverPosition}
+              row={table.rows[structCell.originalIndex]}
+              rowIndex={structCell.originalIndex}
+              structDefinition={structDefinitions[structCell.typeName]}
+              structDefinitions={structDefinitions}
+            />
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ColumnContextMenu({
+  canMoveLeft,
+  canMoveRight,
+  onDelete,
+  onDuplicate,
+  onEditKey,
+  onInsertLeft,
+  onInsertRight,
+  onMoveFirst,
+  onMoveLast,
+  onMoveLeft,
+  onMoveRight,
+  x,
+  y
+}: {
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
+  onDelete: () => void;
+  onDuplicate: () => void;
+  onEditKey: () => void;
+  onInsertLeft: () => void;
+  onInsertRight: () => void;
+  onMoveFirst: () => void;
+  onMoveLast: () => void;
+  onMoveLeft: () => void;
+  onMoveRight: () => void;
+  x: number;
+  y: number;
+}) {
+  return (
+    <div className="context-menu" style={{ left: x, top: y }}>
+      <button disabled={!canMoveLeft} onClick={onMoveLeft}>Move Left</button>
+      <button disabled={!canMoveRight} onClick={onMoveRight}>Move Right</button>
+      <button disabled={!canMoveLeft} onClick={onMoveFirst}>Move to First</button>
+      <button disabled={!canMoveRight} onClick={onMoveLast}>Move to Last</button>
+      <hr />
+      <button onClick={onInsertLeft}>Insert Field Left</button>
+      <button onClick={onInsertRight}>Insert Field Right</button>
+      <button onClick={onDuplicate}>Duplicate Field</button>
+      <button className="danger-menu-item" onClick={onDelete}>Delete Field</button>
+      <hr />
+      <button onClick={onEditKey}>Advanced: Edit MessagePack Key</button>
+    </div>
+  );
+}
+
+function EnumCellInput({
+  dataGridField,
+  dataGridRow,
+  flags,
+  onChange,
+  onFocus,
+  onKeyDown,
+  options,
+  value
+}: {
+  dataGridField: number;
+  dataGridRow: number;
+  flags: boolean;
+  onChange: (value: string) => void;
+  onFocus: () => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+  options: string[];
+  value: string;
+}) {
+  const [focused, setFocused] = useState(false);
+  const query = flags ? value.split(",").at(-1)?.trim() ?? "" : value.trim();
+  const candidates = options.filter((option) => !query || option.toLowerCase().includes(query.toLowerCase()));
+  const showCandidates = focused && candidates.length > 0;
+
+  const choose = (option: string) => {
+    onChange(flags ? replaceLastEnumSegment(value, option) : option);
+    setFocused(false);
+  };
+
+  return (
+    <div className="enum-cell-input">
+      <input
+        className="grid-cell-input"
+        data-grid-field={dataGridField}
+        data-grid-row={dataGridRow}
+        value={value}
+        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+        onChange={(event) => onChange(event.target.value)}
+        onFocus={() => {
+          setFocused(true);
+          onFocus();
+        }}
+        onKeyDown={(event) => {
+          onKeyDown(event);
+          if (event.defaultPrevented) return;
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") setFocused(true);
+        }}
+      />
+      {showCandidates && (
+        <div className="enum-cell-menu">
+          {candidates.map((candidate) => (
+            <button
+              key={candidate}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => choose(candidate)}
+            >
+              {candidate}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function replaceLastEnumSegment(value: string, option: string) {
+  const parts = value.split(",");
+  parts[parts.length - 1] = ` ${option}`;
+  return parts.map((part, index) => (index === 0 ? part.trim() : part.trim())).filter(Boolean).join(", ");
+}
+
+function StructCellPopover({
+  document,
+  field,
+  onClose,
+  position,
+  row,
+  rowIndex,
+  structDefinition,
+  structDefinitions
+}: {
+  document: DefinitionDocument;
+  field?: FieldDefinition;
+  onClose: () => void;
+  position: PopoverPosition;
+  row?: RowDefinition;
+  rowIndex: number;
+  structDefinition?: StructDefinition;
+  structDefinitions: Record<string, StructDefinition>;
+}) {
+  const { documents, updateDocument } = useEditorStore();
+  if (!field || !row || !structDefinition) return null;
+  const currentValue = objectValue(row.data[field.name]);
+
+  const updateStructField = (structField: FieldDefinition, value: MasterValue) => {
+    updateDocument(document.relativePath, `Edit ${field.name}.${structField.name}`, (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const targetRow = draft.definition.rows[rowIndex];
+      if (!targetRow) return;
+      const current = objectValue(targetRow.data[field.name]);
+      targetRow.data[field.name] = { ...current, [structField.name]: value };
+    });
+  };
+
+  return (
+    <div
+      className="struct-cell-popover"
+      style={{ left: position.left, top: position.top }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <div className="struct-cell-title">
+        <strong>{field.name}</strong>
+        <span>{structDefinition.name}</span>
+        <button className="icon-button" title="Close" onClick={onClose}>
+          ×
+        </button>
+      </div>
+      <div className="struct-cell-fields">
+        {structDefinition.fields.map((structField) => {
+          const value = currentValue[structField.name] ?? defaultEditorValue(structField.type, documents, structDefinitions);
+          return (
+            <label className="struct-cell-field" key={structField.name}>
+              <span>{structField.name}</span>
+              <StructFieldInput
+                field={structField}
+                onChange={(nextValue) => updateStructField(structField, nextValue)}
+                structDefinitions={structDefinitions}
+                value={value}
+              />
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StructFieldInput({
+  field,
+  onChange,
+  structDefinitions,
+  value
+}: {
+  field: FieldDefinition;
+  onChange: (value: MasterValue) => void;
+  structDefinitions: Record<string, StructDefinition>;
+  value: MasterValue;
+}) {
+  const { documents } = useEditorStore();
+  const enumMembers = enumMemberOptions(documents, field.type);
+  if (field.type === "bool") {
+    return (
+      <select value={String(Boolean(value))} onChange={(event) => onChange(event.target.value === "true")}>
+        <option value="false">false</option>
+        <option value="true">true</option>
+      </select>
+    );
+  }
+  if (enumMembers.length > 0) {
+    return (
+      <select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>
+        <option value="" />
+        {enumMembers.map((member) => (
+          <option key={member} value={member}>
+            {member}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  if (field.type.startsWith("list<") || structDefinitions[field.type]) {
+    return (
+      <textarea
+        defaultValue={formatJsonValue(value)}
+        onBlur={(event) => {
+          const raw = event.target.value.trim();
+          if (!raw) {
+            onChange(field.type.startsWith("list<") ? [] : {});
+            return;
+          }
+          try {
+            onChange(JSON.parse(raw) as MasterValue);
+          } catch {
+            onChange(raw);
+          }
+        }}
+      />
+    );
+  }
+  return (
+    <input
+      value={formatValue(value)}
+      onChange={(event) => onChange(coerceValue(field.type, event.target.value))}
+    />
+  );
+}
+
+function structDefinitionMap(documents: Record<string, DefinitionDocument>) {
+  return Object.fromEntries(
+    Object.values(documents)
+      .filter((document) => document.definition.kind === "struct")
+      .map((document) => [document.typeName, document.definition as StructDefinition])
+  );
+}
+
+function objectValue(value: MasterValue | undefined): Record<string, MasterValue> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  return {};
+}
+
+function defaultEditorValue(
+  type: string,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): MasterValue {
+  if (type === "bool") return false;
+  if (type === "int" || type === "long" || type === "float" || type === "double") return 0;
+  if (type.startsWith("list<")) return [];
+  if (structDefinitions[type]) return {};
+  return enumMemberOptions(documents, type)[0] ?? "";
+}
+
+function enumMemberOptions(documents: Record<string, DefinitionDocument>, typeName: string) {
+  return enumInfoForType(documents, typeName)?.members ?? [];
+}
+
+function enumInfoForType(documents: Record<string, DefinitionDocument>, typeName: string) {
+  const document = Object.values(documents).find(
+    (item) => item.definition.kind === "enum" && item.typeName === typeName
+  );
+  if (!document || document.definition.kind !== "enum") return undefined;
+  return {
+    flags: Boolean(document.definition.flags),
+    members: document.definition.members.map((member) => (typeof member === "string" ? member : member.name))
+  };
+}
+
+function formatJsonValue(value: MasterValue) {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value ?? {}, null, 2);
+}
+
+function useFilteredRows(table: TableDefinition) {
+  const { profilePreview, project, tagFilter } = useEditorStore();
+  return useMemo(() => {
+    const profile = profilePreview ? project?.config.buildProfiles?.[profilePreview] : undefined;
+    return table.rows
+      .map((row, originalIndex) => {
+        const tags = row.meta?.tags ?? [];
+        const tagHidden = !matchesTagRule(tags, tagFilter.include, tagFilter.exclude);
+        const profileExcluded = profile ? !matchesTagRule(tags, profile.includeTags ?? [], profile.excludeTags ?? []) : false;
+        return { row, originalIndex, filteredOut: profileExcluded, hidden: tagHidden };
+      })
+      .filter((entry) => !entry.hidden);
+  }, [profilePreview, project?.config.buildProfiles, table.rows, tagFilter]);
+}
+
+function useGapDrag(
+  containerRef: React.RefObject<HTMLElement | null>,
+  onDrop: (from: number, gap: number) => void
+) {
+  const [state, setState] = useState<{ from: number; gap: number; left: number }>();
+  const stateRef = useRef<typeof state>(undefined);
+
+  const start = (from: number, event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const update = (clientX: number) => {
+      const next = calculateGap(container, clientX);
+      const dragState = { from, gap: next.gap, left: next.left };
+      stateRef.current = dragState;
+      setState(dragState);
+    };
+    update(event.clientX);
+
+    const onPointerMove = (moveEvent: PointerEvent) => update(moveEvent.clientX);
+    const onPointerUp = () => {
+      const latest = stateRef.current;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      setState(undefined);
+      stateRef.current = undefined;
+      if (latest) onDrop(latest.from, latest.gap);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+  };
+
+  return { state, start };
+}
+
+function calculateGap(container: HTMLElement, clientX: number) {
+  const containerRect = container.getBoundingClientRect();
+  const items = Array.from(container.querySelectorAll<HTMLElement>("[data-field-index]"));
+  if (items.length === 0) return { gap: 0, left: 0 };
+
+  for (let index = 0; index < items.length; index += 1) {
+    const rect = items[index].getBoundingClientRect();
+    if (clientX < rect.left + rect.width / 2) {
+      return { gap: index, left: rect.left - containerRect.left + container.scrollLeft };
+    }
+  }
+
+  const lastRect = items[items.length - 1].getBoundingClientRect();
+  return {
+    gap: items.length,
+    left: lastRect.right - containerRect.left + container.scrollLeft
+  };
+}
+
+function gridFieldToColumn(field: GridField) {
+  return field === "tags" ? 0 : field + 1;
+}
+
+function columnToGridField(column: number): GridField {
+  return column === 0 ? "tags" : column - 1;
+}
+
+function clamp(value: number, min: number, max: number) {
+  if (max < min) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function sameCell(left: ActiveCell | undefined, right: ActiveCell) {
+  return left?.visibleRowIndex === right.visibleRowIndex && left.field === right.field;
+}
+
+function gridColumns(fieldCount: number, zoom: number) {
+  return `${scaledSize(ROW_NUMBER_WIDTH, zoom)}px ${scaledSize(META_TAGS_WIDTH, zoom)}px repeat(${fieldCount}, ${scaledSize(FIELD_WIDTH, zoom)}px)`;
+}
+
+function totalGridWidth(fieldCount: number, zoom: number) {
+  return scaledSize(ROW_NUMBER_WIDTH, zoom) + scaledSize(META_TAGS_WIDTH, zoom) + fieldCount * scaledSize(FIELD_WIDTH, zoom);
+}
+
+function scaledSize(value: number, zoom: number) {
+  return Math.max(24, Math.round(value * zoom));
+}
