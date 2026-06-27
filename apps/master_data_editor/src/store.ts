@@ -403,7 +403,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   async deleteEntry(relativePath) {
     const source = get().documents[relativePath];
-    if (!source) return;
+    if (!source) {
+      const project = get().project;
+      const path = normalizeRelativePath(relativePath);
+      if (!project || !path) return;
+      ensurePathIsClean(path);
+      set({ isBusy: true, error: undefined });
+      try {
+        await api.deleteEntry(project.root, path);
+        set((state) => ({ buildLog: [...state.buildLog, `Delete ${path}`] }));
+        await get().reloadProject();
+      } catch (error) {
+        set((state) => ({
+          error: String(error),
+          buildLog: [...state.buildLog, `Delete ${path}: ${String(error)}`]
+        }));
+      } finally {
+        set({ isBusy: false });
+      }
+      return;
+    }
     ensureFileIsClean(relativePath);
     const definition = cloneDefinition(source.definition);
     await runFileTransaction({
@@ -517,7 +536,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
   addRow(path) {
-    get().updateDocument(path, "Add Row", (document) => {
+    get().updateDocument(path, "Add Record", (document) => {
       if (document.definition.kind !== "table") return;
       const data: Record<string, MasterValue> = {};
       for (const field of document.definition.fields) {
@@ -527,7 +546,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
   deleteRow(path, rowIndex) {
-    get().updateDocument(path, "Delete Row", (document) => {
+    get().updateDocument(path, "Delete Record", (document) => {
       if (document.definition.kind !== "table") return;
       document.definition.rows.splice(rowIndex, 1);
     });

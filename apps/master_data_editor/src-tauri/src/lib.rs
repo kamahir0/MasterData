@@ -10,11 +10,49 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use tauri::menu::{Menu, MenuItem, Submenu};
-use tauri::{AppHandle, Emitter};
+use tauri::menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{AppHandle, Emitter, LogicalPosition, Window};
 
 const MENU_OPEN_PROJECT: &str = "file_open_project";
+const MENU_MASTER_CREATE_PREFIX: &str = "master_create:";
+const MENU_MASTER_ENTRY_PREFIX: &str = "master_entry:";
+const MENU_TABLE_CREATE_PREFIX: &str = "table_create:";
+const MENU_TABLE_COLUMN_PREFIX: &str = "table_column:";
+const MENU_TABLE_RECORD_PREFIX: &str = "table_record:";
 const EVENT_OPEN_PROJECT: &str = "menu-open-project";
+const EVENT_MASTER_CREATE_ENTRY: &str = "master-create-entry";
+const EVENT_MASTER_ENTRY_ACTION: &str = "master-entry-action";
+const EVENT_TABLE_CREATE_ENTRY: &str = "table-create-entry";
+const EVENT_TABLE_COLUMN_ACTION: &str = "table-column-action";
+const EVENT_TABLE_RECORD_ACTION: &str = "table-record-action";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MasterCreateMenuPayload {
+    kind: String,
+    directory: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MasterEntryMenuPayload {
+    action: String,
+    kind: String,
+    path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TableCreateMenuPayload {
+    kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TableIndexedMenuPayload {
+    action: String,
+    index: usize,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,6 +171,292 @@ struct CommandResult {
 #[tauri::command]
 fn request_app_exit(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+fn popup_master_create_menu(
+    window: Window,
+    directory: String,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let folder = MenuItem::with_id(
+        &window,
+        format!("{MENU_MASTER_CREATE_PREFIX}folder:{directory}"),
+        "Folder",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let table = MenuItem::with_id(
+        &window,
+        format!("{MENU_MASTER_CREATE_PREFIX}table:{directory}"),
+        "Table",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let enum_file = MenuItem::with_id(
+        &window,
+        format!("{MENU_MASTER_CREATE_PREFIX}enum:{directory}"),
+        "Enum",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let struct_file = MenuItem::with_id(
+        &window,
+        format!("{MENU_MASTER_CREATE_PREFIX}struct:{directory}"),
+        "Struct",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let create = Submenu::with_items(
+        &window,
+        "Create",
+        true,
+        &[&folder, &table, &enum_file, &struct_file],
+    )
+    .map_err(to_string)?;
+    let menu = Menu::with_items(&window, &[&create]).map_err(to_string)?;
+    menu.popup_at(window, LogicalPosition::new(x, y))
+        .map_err(to_string)
+}
+
+#[tauri::command]
+fn popup_master_entry_menu(
+    window: Window,
+    kind: String,
+    path: String,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let rename = MenuItem::with_id(
+        &window,
+        format!("{MENU_MASTER_ENTRY_PREFIX}rename:{kind}:{path}"),
+        "Rename",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let delete = MenuItem::with_id(
+        &window,
+        format!("{MENU_MASTER_ENTRY_PREFIX}delete:{kind}:{path}"),
+        "Delete",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    if kind == "directory" {
+        let folder = MenuItem::with_id(
+            &window,
+            format!("{MENU_MASTER_CREATE_PREFIX}folder:{path}"),
+            "Folder",
+            true,
+            None::<&str>,
+        )
+        .map_err(to_string)?;
+        let table = MenuItem::with_id(
+            &window,
+            format!("{MENU_MASTER_CREATE_PREFIX}table:{path}"),
+            "Table",
+            true,
+            None::<&str>,
+        )
+        .map_err(to_string)?;
+        let enum_file = MenuItem::with_id(
+            &window,
+            format!("{MENU_MASTER_CREATE_PREFIX}enum:{path}"),
+            "Enum",
+            true,
+            None::<&str>,
+        )
+        .map_err(to_string)?;
+        let struct_file = MenuItem::with_id(
+            &window,
+            format!("{MENU_MASTER_CREATE_PREFIX}struct:{path}"),
+            "Struct",
+            true,
+            None::<&str>,
+        )
+        .map_err(to_string)?;
+        let create = Submenu::with_items(
+            &window,
+            "Create",
+            true,
+            &[&folder, &table, &enum_file, &struct_file],
+        )
+        .map_err(to_string)?;
+        let separator = PredefinedMenuItem::separator(&window).map_err(to_string)?;
+        let menu = Menu::with_items(&window, &[&create, &separator, &rename, &delete])
+            .map_err(to_string)?;
+        return menu
+            .popup_at(window, LogicalPosition::new(x, y))
+            .map_err(to_string);
+    }
+
+    let menu = Menu::with_items(&window, &[&rename, &delete]).map_err(to_string)?;
+    menu.popup_at(window, LogicalPosition::new(x, y))
+        .map_err(to_string)
+}
+
+#[tauri::command]
+fn popup_table_create_menu(window: Window, x: f64, y: f64) -> Result<(), String> {
+    let field = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_CREATE_PREFIX}field"),
+        "Field",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let record = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_CREATE_PREFIX}record"),
+        "Record",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let create =
+        Submenu::with_items(&window, "Create", true, &[&field, &record]).map_err(to_string)?;
+    let menu = Menu::with_items(&window, &[&create]).map_err(to_string)?;
+    menu.popup_at(window, LogicalPosition::new(x, y))
+        .map_err(to_string)
+}
+
+#[tauri::command]
+fn popup_table_column_menu(
+    window: Window,
+    index: usize,
+    can_move_left: bool,
+    can_move_right: bool,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let move_left = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}move_left:{index}"),
+        "Move Left",
+        can_move_left,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let move_right = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}move_right:{index}"),
+        "Move Right",
+        can_move_right,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let move_first = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}move_first:{index}"),
+        "Move to First",
+        can_move_left,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let move_last = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}move_last:{index}"),
+        "Move to Last",
+        can_move_right,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let insert_left = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}insert_left:{index}"),
+        "Insert Field Left",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let insert_right = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}insert_right:{index}"),
+        "Insert Field Right",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let duplicate = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}duplicate:{index}"),
+        "Duplicate Field",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let delete = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}delete:{index}"),
+        "Delete Field",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let edit_key = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_COLUMN_PREFIX}edit_key:{index}"),
+        "Advanced: Edit MessagePack Key",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let separator1 = PredefinedMenuItem::separator(&window).map_err(to_string)?;
+    let separator2 = PredefinedMenuItem::separator(&window).map_err(to_string)?;
+    let menu = Menu::with_items(
+        &window,
+        &[
+            &move_left,
+            &move_right,
+            &move_first,
+            &move_last,
+            &separator1,
+            &insert_left,
+            &insert_right,
+            &duplicate,
+            &delete,
+            &separator2,
+            &edit_key,
+        ],
+    )
+    .map_err(to_string)?;
+    menu.popup_at(window, LogicalPosition::new(x, y))
+        .map_err(to_string)
+}
+
+#[tauri::command]
+fn popup_table_record_menu(
+    window: Window,
+    index: usize,
+    can_paste: bool,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let copy = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_RECORD_PREFIX}copy:{index}"),
+        "Copy Record",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let paste = MenuItem::with_id(
+        &window,
+        format!("{MENU_TABLE_RECORD_PREFIX}paste:{index}"),
+        "Paste Record",
+        can_paste,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let menu = Menu::with_items(&window, &[&copy, &paste]).map_err(to_string)?;
+    menu.popup_at(window, LogicalPosition::new(x, y))
+        .map_err(to_string)
 }
 
 #[tauri::command]
@@ -351,6 +675,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .menu(|app| {
+            let menu = Menu::default(app)?;
             let open_project = MenuItem::with_id(
                 app,
                 MENU_OPEN_PROJECT,
@@ -358,16 +683,100 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+O"),
             )?;
-            let file_menu = Submenu::with_items(app, "File", true, &[&open_project])?;
-            Menu::with_items(app, &[&file_menu])
+            let separator = PredefinedMenuItem::separator(app)?;
+            for item in menu.items()? {
+                let Some(submenu) = item.as_submenu() else {
+                    continue;
+                };
+                if submenu.text()? == "File" {
+                    submenu.prepend_items(&[&open_project, &separator])?;
+                    break;
+                }
+            }
+            Ok(menu)
         })
         .on_menu_event(|app, event| {
             if event.id() == MENU_OPEN_PROJECT {
                 let _ = app.emit(EVENT_OPEN_PROJECT, ());
+                return;
+            }
+            let id = event.id().as_ref();
+            if let Some(payload) = id.strip_prefix(MENU_MASTER_CREATE_PREFIX) {
+                let mut parts = payload.splitn(2, ':');
+                let kind = parts.next().unwrap_or_default();
+                let directory = parts.next().unwrap_or_default();
+                let _ = app.emit(
+                    EVENT_MASTER_CREATE_ENTRY,
+                    MasterCreateMenuPayload {
+                        kind: kind.to_string(),
+                        directory: directory.to_string(),
+                    },
+                );
+                return;
+            }
+            if let Some(payload) = id.strip_prefix(MENU_MASTER_ENTRY_PREFIX) {
+                let mut parts = payload.splitn(3, ':');
+                let action = parts.next().unwrap_or_default();
+                let kind = parts.next().unwrap_or_default();
+                let path = parts.next().unwrap_or_default();
+                let _ = app.emit(
+                    EVENT_MASTER_ENTRY_ACTION,
+                    MasterEntryMenuPayload {
+                        action: action.to_string(),
+                        kind: kind.to_string(),
+                        path: path.to_string(),
+                    },
+                );
+                return;
+            }
+            if let Some(kind) = id.strip_prefix(MENU_TABLE_CREATE_PREFIX) {
+                let _ = app.emit(
+                    EVENT_TABLE_CREATE_ENTRY,
+                    TableCreateMenuPayload {
+                        kind: kind.to_string(),
+                    },
+                );
+                return;
+            }
+            if let Some(payload) = id.strip_prefix(MENU_TABLE_COLUMN_PREFIX) {
+                let mut parts = payload.splitn(2, ':');
+                let action = parts.next().unwrap_or_default();
+                let index = parts
+                    .next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or_default();
+                let _ = app.emit(
+                    EVENT_TABLE_COLUMN_ACTION,
+                    TableIndexedMenuPayload {
+                        action: action.to_string(),
+                        index,
+                    },
+                );
+                return;
+            }
+            if let Some(payload) = id.strip_prefix(MENU_TABLE_RECORD_PREFIX) {
+                let mut parts = payload.splitn(2, ':');
+                let action = parts.next().unwrap_or_default();
+                let index = parts
+                    .next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or_default();
+                let _ = app.emit(
+                    EVENT_TABLE_RECORD_ACTION,
+                    TableIndexedMenuPayload {
+                        action: action.to_string(),
+                        index,
+                    },
+                );
             }
         })
         .invoke_handler(tauri::generate_handler![
             request_app_exit,
+            popup_master_create_menu,
+            popup_master_entry_menu,
+            popup_table_create_menu,
+            popup_table_column_menu,
+            popup_table_record_menu,
             open_project,
             reload_project,
             validate_editor_project,

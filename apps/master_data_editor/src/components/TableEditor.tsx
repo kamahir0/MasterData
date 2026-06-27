@@ -1,6 +1,8 @@
 import { AlertCircle, ChevronDown, ChevronRight, GripVertical, Link2, Plus, Table2, Tags, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
 import { coerceValue, useEditorStore } from "../store";
 import {
@@ -24,12 +26,16 @@ import { TagTokenInput, uniqueTags } from "./TagTokenInput";
 const ROW_NUMBER_WIDTH = 64;
 const META_TAGS_WIDTH = 180;
 const FIELD_WIDTH = 190;
+const ADD_FIELD_WIDTH = 44;
 const ROW_HEIGHT = 34;
 
 type VisibleRow = { row: RowDefinition; originalIndex: number; filteredOut: boolean };
 type GridField = number | "tags";
 type ActiveCell = { visibleRowIndex: number; field: GridField };
 type ActiveCellState = ActiveCell & { mode: "select" | "edit" };
+type SelectedRowState = { visibleRowIndex: number; originalIndex: number };
+type TableCreateEvent = { kind: "field" | "record" };
+type TableIndexedMenuEvent = { action: string; index: number };
 type SelectedStructCell = {
   fieldIndex: number;
   originalIndex: number;
@@ -424,6 +430,10 @@ function RecordsGrid({
       moveFieldToGap(draft.definition.fields, from, gap);
     });
   });
+  const [selectedRow, setSelectedRow] = useState<SelectedRowState>();
+  const [rowClipboard, setRowClipboard] = useState<RowDefinition>();
+  const [rowContextMenu, setRowContextMenu] = useState<{ x: number; y: number; visibleRowIndex: number; originalIndex: number }>();
+  const [recordsCreateMenu, setRecordsCreateMenu] = useState<{ x: number; y: number }>();
 
   useEffect(() => {
     rowVirtualizer.measure();
@@ -439,6 +449,75 @@ function RecordsGrid({
       window.removeEventListener("keydown", close);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!rowContextMenu) return;
+    const close = () => setRowContextMenu(undefined);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [rowContextMenu]);
+
+  useEffect(() => {
+    if (!recordsCreateMenu) return;
+    const close = () => setRecordsCreateMenu(undefined);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [recordsCreateMenu]);
+
+  useEffect(() => {
+    if (!selectedRow) return;
+    if (!rows.some((entry, visibleRowIndex) => visibleRowIndex === selectedRow.visibleRowIndex && entry.originalIndex === selectedRow.originalIndex)) {
+      setSelectedRow(undefined);
+    }
+  }, [rows, selectedRow]);
+
+  const selectRow = (visibleRowIndex: number, originalIndex: number) => {
+    setSelectedRow({ visibleRowIndex, originalIndex });
+    setActiveCell(undefined);
+    setStructCell(undefined);
+  };
+
+  const copyRowAt = (originalIndex: number) => {
+    const source = table.rows[originalIndex];
+    if (!source) return;
+    setRowClipboard(cloneRowForFields(source, table.fields, documents, structDefinitions));
+  };
+
+  const pasteRowAt = (originalIndex: number) => {
+    if (!rowClipboard) return;
+    updateDocument(document.relativePath, "Paste record", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      if (!draft.definition.rows[originalIndex]) return;
+      draft.definition.rows[originalIndex] = cloneRowForFields(rowClipboard, draft.definition.fields, documents, structDefinitions);
+    });
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!selectedRow || isEditableElement(event.target)) return;
+      const command = event.metaKey || event.ctrlKey;
+      if (!command) return;
+      const key = event.key.toLowerCase();
+      if (key === "c") {
+        event.preventDefault();
+        copyRowAt(selectedRow.originalIndex);
+      }
+      if (key === "v") {
+        event.preventDefault();
+        pasteRowAt(selectedRow.originalIndex);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [documents, rowClipboard, selectedRow, structDefinitions, table.fields, table.rows, updateDocument]);
 
   const onWheel = (event: React.WheelEvent<HTMLDivElement>) => {
     if (!event.shiftKey || !scrollRef.current) return;
@@ -547,7 +626,20 @@ function RecordsGrid({
 
   const openColumnMenu = (event: React.MouseEvent, index: number) => {
     event.preventDefault();
-    setContextMenu({ x: event.clientX, y: event.clientY, index });
+    event.stopPropagation();
+    const x = event.clientX;
+    const y = event.clientY;
+    if ("__TAURI_INTERNALS__" in window) {
+      void invoke("popup_table_column_menu", {
+        index,
+        canMoveLeft: index > 0,
+        canMoveRight: index < table.fields.length - 1,
+        x,
+        y
+      }).catch(() => setContextMenu({ x, y, index }));
+      return;
+    }
+    setContextMenu({ x, y, index });
   };
 
   const renameField = (index: number, nextName: string) => {
@@ -581,6 +673,84 @@ function RecordsGrid({
     });
   };
 
+  const addRecord = () => addRow(document.relativePath);
+
+  const openRecordMenu = (event: React.MouseEvent, visibleRowIndex: number, originalIndex: number) => {
+    event.preventDefault();
+    event.stopPropagation();
+    selectRow(visibleRowIndex, originalIndex);
+    const x = event.clientX;
+    const y = event.clientY;
+    if ("__TAURI_INTERNALS__" in window) {
+      void invoke("popup_table_record_menu", {
+        index: originalIndex,
+        canPaste: Boolean(rowClipboard),
+        x,
+        y
+      }).catch(() => setRowContextMenu({ x, y, visibleRowIndex, originalIndex }));
+      return;
+    }
+    setRowContextMenu({ x, y, visibleRowIndex, originalIndex });
+  };
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void listen<TableIndexedMenuEvent>("table-column-action", (event) => {
+      const { action, index } = event.payload;
+      if (action === "move_left") reorderColumn(index, index - 1);
+      if (action === "move_right") reorderColumn(index, index + 1);
+      if (action === "move_first") reorderColumn(index, 0);
+      if (action === "move_last") reorderColumn(index, table.fields.length - 1);
+      if (action === "insert_left") insertColumn(index, "left");
+      if (action === "insert_right") insertColumn(index, "right");
+      if (action === "duplicate") duplicateColumn(index);
+      if (action === "delete") deleteColumn(index);
+      if (action === "edit_key") editMessagePackKey(index);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => unlisten?.();
+  }, [document.relativePath, table.fields, table.fields.length, updateDocument]);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void listen<TableIndexedMenuEvent>("table-record-action", (event) => {
+      const { action, index } = event.payload;
+      if (action === "copy") copyRowAt(index);
+      if (action === "paste") pasteRowAt(index);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => unlisten?.();
+  }, [documents, rowClipboard, structDefinitions, table.fields, table.rows, updateDocument]);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void listen<TableCreateEvent>("table-create-entry", (event) => {
+      if (event.payload.kind === "field") addField();
+      if (event.payload.kind === "record") addRecord();
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => unlisten?.();
+  }, [addRow, document.relativePath, table.fields, updateDocument]);
+
+  const openRecordsCreateMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const x = event.clientX;
+    const y = event.clientY;
+    if ("__TAURI_INTERNALS__" in window) {
+      void invoke("popup_table_create_menu", { x, y })
+        .catch(() => setRecordsCreateMenu({ x, y }));
+      return;
+    }
+    setRecordsCreateMenu({ x, y });
+  };
+
   const handlePaste = (event: React.ClipboardEvent<HTMLInputElement>, rowIndex: number, fieldIndex: number) => {
     const text = event.clipboardData.getData("text/plain");
     if (!text.includes("\t") && !text.includes("\n")) return;
@@ -606,6 +776,7 @@ function RecordsGrid({
   const setActiveGridCell = (visibleRowIndex: number, field: GridField, mode: ActiveCellState["mode"]) => {
     const cell = { visibleRowIndex, field, mode };
     setActiveCell(cell);
+    setSelectedRow(undefined);
     if (field === "tags") {
       setStructCell(undefined);
       return;
@@ -749,17 +920,22 @@ function RecordsGrid({
   return (
     <section className="records-panel">
       <div className="section-heading records-heading">
+        <button className="icon-button records-create-button" title="Create" onClick={openRecordsCreateMenu}>
+          <Plus size={14} />
+        </button>
         <Table2 size={15} />
         Records
         <span>
           {rows.filter((entry) => !entry.filteredOut).length} / {table.rows.length}
         </span>
-        <button className="secondary-button compact" onClick={() => addRow(document.relativePath)}>
-          Add Row
-        </button>
-        <button className="secondary-button compact" onClick={addField}>
-          Add Field
-        </button>
+        {recordsCreateMenu && (
+          <RecordsCreateMenu
+            onCreateField={addField}
+            onCreateRecord={addRecord}
+            x={recordsCreateMenu.x}
+            y={recordsCreateMenu.y}
+          />
+        )}
       </div>
       <div className="records-grid" ref={scrollRef} onWheel={onWheel}>
         <div className="master-grid" style={{ minWidth: totalGridWidth(table.fields.length, zoom) }}>
@@ -816,6 +992,11 @@ function RecordsGrid({
                 </select>
               </div>
             ))}
+            <div className="grid-add-field-head">
+              <button className="icon-button grid-header-add-field" title="Add field" onClick={addField}>
+                <Plus size={14} />
+              </button>
+            </div>
           </div>
           {drag.state && <div className="gap-marker records-gap-marker" style={{ left: drag.state.left }} />}
           {contextMenu && (
@@ -835,6 +1016,15 @@ function RecordsGrid({
               y={contextMenu.y}
             />
           )}
+          {rowContextMenu && (
+            <RowContextMenu
+              canPaste={Boolean(rowClipboard)}
+              onCopy={() => copyRowAt(rowContextMenu.originalIndex)}
+              onPaste={() => pasteRowAt(rowContextMenu.originalIndex)}
+              x={rowContextMenu.x}
+              y={rowContextMenu.y}
+            />
+          )}
           <div className="virtual-canvas" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
               const entry = rows[virtualRow.index];
@@ -846,9 +1036,10 @@ function RecordsGrid({
               const isTagEditing = isTagActive && activeCell?.mode === "edit";
               const primaryKey = table.keys.primary.fields.map((field) => String(row.data[field] ?? "")).join("|");
               const hasDuplicatePrimaryKey = duplicateKeys.has(primaryKey);
+              const isRowSelected = selectedRow?.originalIndex === entry.originalIndex;
               return (
                 <div
-                  className={clsx("grid-row", entry.filteredOut && "profile-filtered")}
+                  className={clsx("grid-row", entry.filteredOut && "profile-filtered", isRowSelected && "row-selected")}
                   key={virtualRow.key}
                   style={{
                     transform: `translateY(${virtualRow.start}px)`,
@@ -856,14 +1047,25 @@ function RecordsGrid({
                     height: rowHeight
                   }}
                 >
-                  <div className={clsx("row-head", hasDuplicatePrimaryKey && "row-error")}>
+                  <div
+                    className={clsx("row-head", hasDuplicatePrimaryKey && "row-error", isRowSelected && "selected")}
+                    onClick={() => selectRow(virtualRow.index, entry.originalIndex)}
+                    onContextMenu={(event) => openRecordMenu(event, virtualRow.index, entry.originalIndex)}
+                    tabIndex={0}
+                  >
                     <span>{entry.originalIndex + 1}</span>
                     {hasDuplicatePrimaryKey && (
                       <span className="row-error-marker" title={`Duplicate primary key: ${primaryKey || "(empty)"}`}>
                         <AlertCircle size={13} />
                       </span>
                     )}
-                    <button title="Delete row" onClick={() => deleteRow(document.relativePath, entry.originalIndex)}>
+                    <button
+                      title="Delete record"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteRow(document.relativePath, entry.originalIndex);
+                      }}
+                    >
                       x
                     </button>
                   </div>
@@ -954,6 +1156,7 @@ function RecordsGrid({
                               dataGridRow={virtualRow.index}
                               flags={enumInfo.flags}
                               options={enumInfo.members}
+                              placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
                               value={formatValue(row.data[field.name])}
                               onChange={(value) => updateCell(document.relativePath, entry.originalIndex, field.name, value)}
                               onFocus={() => {
@@ -966,6 +1169,7 @@ function RecordsGrid({
                               className="grid-cell-input"
                               data-grid-field={fieldIndex}
                               data-grid-row={virtualRow.index}
+                              placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
                               value={formatValue(row.data[field.name])}
                               onFocus={() => {
                                 setActiveGridCell(virtualRow.index, fieldIndex, "edit");
@@ -986,15 +1190,28 @@ function RecordsGrid({
                               beginEditingCell(virtualRow.index, fieldIndex);
                             }}
                           >
-                            <span>{formatValue(row.data[field.name])}</span>
+                            {isEmptyCellValue(row.data[field.name]) ? (
+                              <span className="cell-placeholder">{defaultPlaceholderForType(field.type, documents, structDefinitions)}</span>
+                            ) : (
+                              <span>{formatValue(row.data[field.name])}</span>
+                            )}
                           </button>
                         )}
                       </div>
                     );
                   })}
+                  <div className="grid-add-field-cell" />
                 </div>
               );
             })}
+          </div>
+          <div className="grid-add-row-footer" style={{ gridTemplateColumns }}>
+            <div className="row-head add-row-head">
+              <button className="icon-button" title="Add record" onClick={addRecord}>
+                <Plus size={14} />
+              </button>
+            </div>
+            <div className="grid-add-row-fill" />
           </div>
           {structCell && popoverPosition && (
             <StructCellPopover
@@ -1060,6 +1277,47 @@ function ColumnContextMenu({
   );
 }
 
+function RecordsCreateMenu({
+  onCreateField,
+  onCreateRecord,
+  x,
+  y
+}: {
+  onCreateField: () => void;
+  onCreateRecord: () => void;
+  x: number;
+  y: number;
+}) {
+  return (
+    <div className="context-menu" style={{ left: x, top: y }}>
+      <div className="context-menu-title">Create</div>
+      <button onClick={onCreateField}>Field</button>
+      <button onClick={onCreateRecord}>Record</button>
+    </div>
+  );
+}
+
+function RowContextMenu({
+  canPaste,
+  onCopy,
+  onPaste,
+  x,
+  y
+}: {
+  canPaste: boolean;
+  onCopy: () => void;
+  onPaste: () => void;
+  x: number;
+  y: number;
+}) {
+  return (
+    <div className="context-menu" style={{ left: x, top: y }}>
+      <button onClick={onCopy}>Copy Record</button>
+      <button disabled={!canPaste} onClick={onPaste}>Paste Record</button>
+    </div>
+  );
+}
+
 function EnumCellInput({
   dataGridField,
   dataGridRow,
@@ -1068,6 +1326,7 @@ function EnumCellInput({
   onFocus,
   onKeyDown,
   options,
+  placeholder,
   value
 }: {
   dataGridField: number;
@@ -1077,6 +1336,7 @@ function EnumCellInput({
   onFocus: () => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
   options: string[];
+  placeholder: string;
   value: string;
 }) {
   const [focused, setFocused] = useState(false);
@@ -1095,6 +1355,7 @@ function EnumCellInput({
         className="grid-cell-input"
         data-grid-field={dataGridField}
         data-grid-row={dataGridRow}
+        placeholder={placeholder}
         value={value}
         onBlur={() => window.setTimeout(() => setFocused(false), 120)}
         onChange={(event) => onChange(event.target.value)}
@@ -1180,13 +1441,16 @@ function StructCellPopover({
       </div>
       <div className="struct-cell-fields">
         {structDefinition.fields.map((structField) => {
-          const value = currentValue[structField.name] ?? defaultEditorValue(structField.type, documents, structDefinitions);
+          const hasValue = Object.prototype.hasOwnProperty.call(currentValue, structField.name);
+          const value = hasValue ? currentValue[structField.name] : "";
+          const placeholder = defaultPlaceholderForType(structField.type, documents, structDefinitions);
           return (
             <label className="struct-cell-field" key={structField.name}>
               <span>{structField.name}</span>
               <StructFieldInput
                 field={structField}
                 onChange={(nextValue) => updateStructField(structField, nextValue)}
+                placeholder={placeholder}
                 structDefinitions={structDefinitions}
                 value={value}
               />
@@ -1201,11 +1465,13 @@ function StructCellPopover({
 function StructFieldInput({
   field,
   onChange,
+  placeholder,
   structDefinitions,
   value
 }: {
   field: FieldDefinition;
   onChange: (value: MasterValue) => void;
+  placeholder: string;
   structDefinitions: Record<string, StructDefinition>;
   value: MasterValue;
 }) {
@@ -1222,7 +1488,7 @@ function StructFieldInput({
   if (enumMembers.length > 0) {
     return (
       <select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>
-        <option value="" />
+        <option value="">{placeholder}</option>
         {enumMembers.map((member) => (
           <option key={member} value={member}>
             {member}
@@ -1235,6 +1501,7 @@ function StructFieldInput({
     return (
       <textarea
         defaultValue={formatJsonValue(value)}
+        placeholder={placeholder}
         onBlur={(event) => {
           const raw = event.target.value.trim();
           if (!raw) {
@@ -1252,6 +1519,7 @@ function StructFieldInput({
   }
   return (
     <input
+      placeholder={placeholder}
       value={formatValue(value)}
       onChange={(event) => onChange(coerceValue(field.type, event.target.value))}
     />
@@ -1281,6 +1549,41 @@ function defaultEditorValue(
   if (type.startsWith("list<")) return [];
   if (structDefinitions[type]) return {};
   return enumMemberOptions(documents, type)[0] ?? "";
+}
+
+function cloneRowForFields(
+  row: RowDefinition,
+  fields: FieldDefinition[],
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): RowDefinition {
+  const data: Record<string, MasterValue> = {};
+  for (const field of fields) {
+    const sourceValue = row.data[field.name];
+    data[field.name] = cloneMasterValue(sourceValue === undefined ? defaultEditorValue(field.type, documents, structDefinitions) : sourceValue);
+  }
+  const tags = row.meta?.tags ?? [];
+  return tags.length > 0 ? { data, meta: { tags: [...tags] } } : { data };
+}
+
+function defaultPlaceholderForType(
+  type: string,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+) {
+  if (type === "string") return "string.Empty";
+  const value = defaultEditorValue(type, documents, structDefinitions);
+  if (Array.isArray(value)) return "[]";
+  if (value && typeof value === "object") return "{}";
+  return formatValue(value);
+}
+
+function isEmptyCellValue(value: MasterValue | undefined) {
+  return value == null || value === "";
+}
+
+function isEditableElement(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
 function enumMemberOptions(documents: Record<string, DefinitionDocument>, typeName: string) {
@@ -1393,11 +1696,11 @@ function sameCell(left: ActiveCell | undefined, right: ActiveCell) {
 }
 
 function gridColumns(fieldCount: number, zoom: number) {
-  return `${scaledSize(ROW_NUMBER_WIDTH, zoom)}px ${scaledSize(META_TAGS_WIDTH, zoom)}px repeat(${fieldCount}, ${scaledSize(FIELD_WIDTH, zoom)}px)`;
+  return `${scaledSize(ROW_NUMBER_WIDTH, zoom)}px ${scaledSize(META_TAGS_WIDTH, zoom)}px repeat(${fieldCount}, ${scaledSize(FIELD_WIDTH, zoom)}px) ${scaledSize(ADD_FIELD_WIDTH, zoom)}px`;
 }
 
 function totalGridWidth(fieldCount: number, zoom: number) {
-  return scaledSize(ROW_NUMBER_WIDTH, zoom) + scaledSize(META_TAGS_WIDTH, zoom) + fieldCount * scaledSize(FIELD_WIDTH, zoom);
+  return scaledSize(ROW_NUMBER_WIDTH, zoom) + scaledSize(META_TAGS_WIDTH, zoom) + fieldCount * scaledSize(FIELD_WIDTH, zoom) + scaledSize(ADD_FIELD_WIDTH, zoom);
 }
 
 function scaledSize(value: number, zoom: number) {

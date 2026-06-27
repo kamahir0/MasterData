@@ -7,17 +7,24 @@ import {
   Folder,
   FolderPlus,
   FolderOpen,
-  GripVertical,
   ListFilter,
   Plus,
   Table2,
 } from "lucide-react";
-import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core";
+import {
+  DndContext,
+  PointerSensor,
+  type DragEndEvent,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors
+} from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { LogicalPosition } from "@tauri-apps/api/dpi";
-import { Menu } from "@tauri-apps/api/menu";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditorStore } from "../store";
 import type { DirectoryNode, EditorDiagnostic, FileNode } from "../types";
 import { basename, capitalize, dirname, joinPath, shortPath } from "../editorUtils";
@@ -25,6 +32,13 @@ import { basename, capitalize, dirname, joinPath, shortPath } from "../editorUti
 type SortMode = "name" | "modified";
 type SortDirection = "asc" | "desc";
 type CreateMenuState = { directory: string; x?: number; y?: number };
+type CreateKind = "folder" | "table" | "enum" | "struct";
+type EntryKind = "file" | "directory";
+type InlineEditState =
+  | { mode: "create"; kind: CreateKind; directory: string; name: string }
+  | { mode: "rename"; target: EntryKind; path: string; name: string };
+type MasterCreateEvent = { kind: CreateKind; directory: string };
+type MasterEntryEvent = { action: "rename" | "delete"; kind: EntryKind; path: string };
 
 type TreeNode = DirectoryTreeNode | FileTreeNode;
 
@@ -52,22 +66,26 @@ export function FileExplorer() {
     activePath,
     createDirectory,
     createDefinition,
+    deleteEntry,
     diagnostics,
     dirty,
     isBusy,
     movePath,
     project,
+    renameEntry,
     setActivePath
   } = useEditorStore();
   const [sortMode, setSortMode] = useState<SortMode>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(() => new Set());
   const [createMenu, setCreateMenu] = useState<CreateMenuState>();
+  const [inlineEdit, setInlineEdit] = useState<InlineEditState>();
   const tree = useMemo(
     () => buildTree(project?.files ?? [], project?.directories ?? [], diagnostics, sortMode, sortDirection),
     [diagnostics, project?.directories, project?.files, sortDirection, sortMode]
   );
   const rootDrop = useDroppable({ id: dropId("") });
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   useEffect(() => {
     if (!createMenu) return;
@@ -80,22 +98,65 @@ export function FileExplorer() {
     };
   }, [createMenu]);
 
-  const createFolderIn = (directory: string) => {
+  const beginCreate = useCallback((kind: CreateKind, directory: string) => {
     setCreateMenu(undefined);
-    const path = window.prompt("New folder", uniqueCreatePath(project, directory, "NewFolder"));
-    if (path) void createDirectory(path);
+    if (directory) {
+      setCollapsedDirectories((current) => {
+        const next = new Set(current);
+        next.delete(directory);
+        return next;
+      });
+    }
+    const path = uniqueCreatePath(project, directory, createRelativeName(kind, defaultCreateName(kind)));
+    const name = kind === "folder" ? basename(path) : displayFileName(basename(path));
+    setInlineEdit({ mode: "create", kind, directory, name });
+  }, [project]);
+
+  const beginRename = useCallback((target: EntryKind, path: string) => {
+    setCreateMenu(undefined);
+    setInlineEdit({
+      mode: "rename",
+      target,
+      path,
+      name: target === "file" ? displayFileName(basename(path)) : basename(path)
+    });
+  }, []);
+
+  const createFolder = () => beginCreate("folder", createMenu?.directory ?? "");
+
+  const createFile = (kind: "table" | "enum" | "struct") => beginCreate(kind, createMenu?.directory ?? "");
+
+  const commitInlineEdit = () => {
+    if (!inlineEdit) return;
+    const name = inlineEdit.name.trim();
+    setInlineEdit(undefined);
+    if (!name) return;
+    if (inlineEdit.mode === "create") {
+      const path = joinPath(inlineEdit.directory, createRelativeName(inlineEdit.kind, name));
+      if (inlineEdit.kind === "folder") void createDirectory(path);
+      else void createDefinition(inlineEdit.kind, path);
+      return;
+    }
+    const targetPath = joinPath(dirname(inlineEdit.path), renameRelativeName(inlineEdit.target, name));
+    if (targetPath === inlineEdit.path) return;
+    if (inlineEdit.target === "directory") void movePath(inlineEdit.path, targetPath);
+    else void renameEntry(inlineEdit.path, targetPath);
   };
 
-  const createFileIn = (kind: "table" | "enum" | "struct", directory: string) => {
-    setCreateMenu(undefined);
-    const suggestedName = kind === "table" ? "NewMaster.yaml" : `New${capitalize(kind)}.yaml`;
-    const path = window.prompt(`New ${kind} YAML`, uniqueCreatePath(project, directory, suggestedName));
-    if (path) void createDefinition(kind, path);
+  const cancelInlineEdit = () => setInlineEdit(undefined);
+
+  const openEntryMenu = (kind: EntryKind, path: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if ("__TAURI_INTERNALS__" in window) {
+      void invoke("popup_master_entry_menu", {
+        kind,
+        path,
+        x: event.clientX,
+        y: event.clientY
+      });
+    }
   };
-
-  const createFolder = () => createFolderIn(createMenu?.directory ?? "");
-
-  const createFile = (kind: "table" | "enum" | "struct") => createFileIn(kind, createMenu?.directory ?? "");
 
   const openCreateMenu = (directory: string, event?: React.MouseEvent) => {
     event?.preventDefault();
@@ -103,26 +164,40 @@ export function FileExplorer() {
     if (event && "__TAURI_INTERNALS__" in window) {
       const x = event.clientX;
       const y = event.clientY;
-      const position = new LogicalPosition(x, y);
-      void Menu.new({
-        items: [
-          {
-            text: "Create",
-            items: [
-              { text: "Folder", action: () => createFolderIn(directory) },
-              { text: "Table", action: () => createFileIn("table", directory) },
-              { text: "Enum", action: () => createFileIn("enum", directory) },
-              { text: "Struct", action: () => createFileIn("struct", directory) }
-            ]
-          }
-        ]
-      })
-        .then((menu) => menu.popup(position))
+      void invoke("popup_master_create_menu", { directory, x, y })
         .catch(() => setCreateMenu({ directory, x, y }));
       return;
     }
     setCreateMenu({ directory, x: event?.clientX, y: event?.clientY });
   };
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void listen<MasterCreateEvent>("master-create-entry", (event) => {
+      const { directory, kind } = event.payload;
+      beginCreate(kind, directory);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => unlisten?.();
+  }, [beginCreate]);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void listen<MasterEntryEvent>("master-entry-action", (event) => {
+      const { action, kind, path } = event.payload;
+      if (action === "rename") {
+        beginRename(kind, path);
+        return;
+      }
+      if (window.confirm(`Delete ${path}?`)) void deleteEntry(path);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => unlisten?.();
+  }, [beginRename, deleteEntry]);
 
   const toggleDirectory = (path: string) => {
     setCollapsedDirectories((current) => {
@@ -145,22 +220,16 @@ export function FileExplorer() {
   return (
     <div className="file-tree">
       <div className="panel-title">
+        <button
+          className="icon-button tree-create-button"
+          title="Create"
+          disabled={!project || isBusy}
+          onClick={(event) => openCreateMenu("", event)}
+        >
+          <Plus size={15} />
+        </button>
         <Table2 size={15} />
         Master
-        <div className="tree-actions">
-          <button
-            className="icon-button tree-create-button"
-            title="Create"
-            disabled={!project || isBusy}
-            onClick={(event) => {
-              event.stopPropagation();
-              setCreateMenu((current) => (current && current.directory === "" && current.x == null ? undefined : { directory: "" }));
-            }}
-          >
-            <Plus size={15} />
-          </button>
-          {createMenu && createMenu.x == null && <CreateMenu onCreateFile={createFile} onCreateFolder={createFolder} />}
-        </div>
       </div>
       <div className="tree-sortbar">
         <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
@@ -172,20 +241,33 @@ export function FileExplorer() {
           <option value="desc">Desc</option>
         </select>
       </div>
-      <DndContext onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div
           className={clsx("tree-list", rootDrop.isOver && "drop-target")}
           ref={rootDrop.setNodeRef}
           onContextMenu={(event) => openCreateMenu("", event)}
         >
+          {inlineEdit?.mode === "create" && inlineEdit.directory === "" && (
+            <InlineEditRow
+              edit={inlineEdit}
+              level={0}
+              onCancel={cancelInlineEdit}
+              onChange={(name) => setInlineEdit({ ...inlineEdit, name })}
+              onCommit={commitInlineEdit}
+            />
+          )}
           {tree.children.map((node) => (
             <TreeNodeView
               activePath={activePath}
               collapsedDirectories={collapsedDirectories}
               dirty={dirty}
+              inlineEdit={inlineEdit}
               key={node.path}
               node={node}
-              onOpenCreateMenu={openCreateMenu}
+              onCancelInlineEdit={cancelInlineEdit}
+              onChangeInlineEdit={(name) => inlineEdit && setInlineEdit({ ...inlineEdit, name })}
+              onCommitInlineEdit={commitInlineEdit}
+              onOpenEntryMenu={openEntryMenu}
               onSelectFile={setActivePath}
               onToggleDirectory={toggleDirectory}
               level={0}
@@ -224,21 +306,23 @@ function CreateMenu({
       className={clsx("tree-create-menu", fixed && "tree-context-menu")}
       style={fixed ? { left: x, top: y } : undefined}
       onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="tree-menu-title">Create</div>
-      <button className="tree-menu-child" onClick={onCreateFolder}>
+      <button className="tree-menu-child" type="button" onClick={onCreateFolder}>
         <FolderPlus size={14} />
         Folder
       </button>
-      <button className="tree-menu-child" onClick={() => onCreateFile("table")}>
+      <button className="tree-menu-child" type="button" onClick={() => onCreateFile("table")}>
         <Table2 size={14} />
         Table
       </button>
-      <button className="tree-menu-child" onClick={() => onCreateFile("enum")}>
+      <button className="tree-menu-child" type="button" onClick={() => onCreateFile("enum")}>
         <ListFilter size={14} />
         Enum
       </button>
-      <button className="tree-menu-child" onClick={() => onCreateFile("struct")}>
+      <button className="tree-menu-child" type="button" onClick={() => onCreateFile("struct")}>
         <Braces size={14} />
         Struct
       </button>
@@ -252,7 +336,11 @@ function TreeNodeView({
   dirty,
   level,
   node,
-  onOpenCreateMenu,
+  inlineEdit,
+  onCancelInlineEdit,
+  onChangeInlineEdit,
+  onCommitInlineEdit,
+  onOpenEntryMenu,
   onSelectFile,
   onToggleDirectory
 }: {
@@ -261,36 +349,77 @@ function TreeNodeView({
   dirty: Record<string, boolean>;
   level: number;
   node: TreeNode;
-  onOpenCreateMenu: (directory: string, event: React.MouseEvent) => void;
+  inlineEdit?: InlineEditState;
+  onCancelInlineEdit: () => void;
+  onChangeInlineEdit: (name: string) => void;
+  onCommitInlineEdit: () => void;
+  onOpenEntryMenu: (kind: EntryKind, path: string, event: React.MouseEvent) => void;
   onSelectFile: (path: string) => void;
   onToggleDirectory: (path: string) => void;
 }) {
   if (node.nodeKind === "directory") {
     const collapsed = collapsedDirectories.has(node.path);
+    const renaming = inlineEdit?.mode === "rename" && inlineEdit.path === node.path;
+    if (renaming) {
+      return (
+        <InlineEditRow
+          edit={inlineEdit}
+          level={level}
+          onCancel={onCancelInlineEdit}
+          onChange={onChangeInlineEdit}
+          onCommit={onCommitInlineEdit}
+        />
+      );
+    }
     return (
       <>
         <DirectoryItem
           collapsed={collapsed}
           level={level}
           node={node}
-          onOpenCreateMenu={onOpenCreateMenu}
+          onOpenEntryMenu={onOpenEntryMenu}
           onToggle={() => onToggleDirectory(node.path)}
         />
+        {!collapsed && inlineEdit?.mode === "create" && inlineEdit.directory === node.path && (
+          <InlineEditRow
+            edit={inlineEdit}
+            level={level + 1}
+            onCancel={onCancelInlineEdit}
+            onChange={onChangeInlineEdit}
+            onCommit={onCommitInlineEdit}
+          />
+        )}
         {!collapsed &&
           node.children.map((child) => (
             <TreeNodeView
               activePath={activePath}
               collapsedDirectories={collapsedDirectories}
               dirty={dirty}
+              inlineEdit={inlineEdit}
               key={child.path}
               level={level + 1}
               node={child}
-              onOpenCreateMenu={onOpenCreateMenu}
+              onCancelInlineEdit={onCancelInlineEdit}
+              onChangeInlineEdit={onChangeInlineEdit}
+              onCommitInlineEdit={onCommitInlineEdit}
+              onOpenEntryMenu={onOpenEntryMenu}
               onSelectFile={onSelectFile}
               onToggleDirectory={onToggleDirectory}
             />
           ))}
       </>
+    );
+  }
+
+  if (inlineEdit?.mode === "rename" && inlineEdit.path === node.file.relativePath) {
+    return (
+      <InlineEditRow
+        edit={inlineEdit}
+        level={level}
+        onCancel={onCancelInlineEdit}
+        onChange={onChangeInlineEdit}
+        onCommit={onCommitInlineEdit}
+      />
     );
   }
 
@@ -300,6 +429,7 @@ function TreeNodeView({
       dirty={Boolean(dirty[node.file.relativePath])}
       level={level}
       node={node}
+      onOpenEntryMenu={onOpenEntryMenu}
       onSelect={() => onSelectFile(node.file.relativePath)}
     />
   );
@@ -309,13 +439,13 @@ function DirectoryItem({
   collapsed,
   level,
   node,
-  onOpenCreateMenu,
+  onOpenEntryMenu,
   onToggle
 }: {
   collapsed: boolean;
   level: number;
   node: DirectoryTreeNode;
-  onOpenCreateMenu: (directory: string, event: React.MouseEvent) => void;
+  onOpenEntryMenu: (kind: EntryKind, path: string, event: React.MouseEvent) => void;
   onToggle: () => void;
 }) {
   const draggable = useDraggable({ id: dragId("directory", node.path) });
@@ -327,6 +457,7 @@ function DirectoryItem({
       className={clsx("tree-row directory", droppable.isOver && "drop-target")}
       ref={(element) => {
         draggable.setNodeRef(element);
+        draggable.setActivatorNodeRef(element);
         droppable.setNodeRef(element);
       }}
       style={
@@ -335,29 +466,29 @@ function DirectoryItem({
           transform: CSS.Translate.toString(draggable.transform)
         } as React.CSSProperties
       }
-      onContextMenu={(event) => onOpenCreateMenu(node.path, event)}
+      {...draggable.attributes}
+      {...draggable.listeners}
+      onContextMenu={(event) => onOpenEntryMenu("directory", node.path, event)}
+      onClick={onToggle}
+      onKeyDown={(event) => activateWithKeyboard(event, onToggle)}
+      tabIndex={0}
+      role="treeitem"
+      aria-expanded={!collapsed}
     >
-      <button
+      <span
         className="tree-disclosure"
-        onClick={onToggle}
         title={collapsed ? "Expand folder" : "Collapse folder"}
       >
         {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-      </button>
-      <button className="tree-item directory-item" onClick={onToggle} title={title}>
+      </span>
+      <div
+        className="tree-item directory-item"
+        title={title}
+      >
         {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
         <span className="tree-name">{node.name}</span>
         {node.hasError && <AlertCircle size={13} className="error-icon" />}
-      </button>
-      <button
-        className="tree-drag-handle"
-        title="Move folder"
-        ref={draggable.setActivatorNodeRef}
-        {...draggable.listeners}
-        {...draggable.attributes}
-      >
-        <GripVertical size={13} />
-      </button>
+      </div>
     </div>
   );
 }
@@ -367,12 +498,14 @@ function FileItem({
   dirty,
   level,
   node,
+  onOpenEntryMenu,
   onSelect
 }: {
   active: boolean;
   dirty: boolean;
   level: number;
   node: FileTreeNode;
+  onOpenEntryMenu: (kind: EntryKind, path: string, event: React.MouseEvent) => void;
   onSelect: () => void;
 }) {
   const draggable = useDraggable({ id: dragId("file", node.file.relativePath) });
@@ -381,37 +514,134 @@ function FileItem({
   return (
     <div
       className={clsx("tree-row file", active && "active")}
-      ref={draggable.setNodeRef}
+      ref={(element) => {
+        draggable.setNodeRef(element);
+        draggable.setActivatorNodeRef(element);
+      }}
       style={
         {
           "--tree-indent": `${level * 14}px`,
           transform: CSS.Translate.toString(draggable.transform)
         } as React.CSSProperties
       }
-      onContextMenu={(event) => event.stopPropagation()}
+      {...draggable.attributes}
+      {...draggable.listeners}
+      onContextMenu={(event) => onOpenEntryMenu("file", node.file.relativePath, event)}
+      onClick={onSelect}
+      onKeyDown={(event) => activateWithKeyboard(event, onSelect)}
+      tabIndex={0}
+      role="treeitem"
+      aria-selected={active}
     >
       <div className="tree-spacer" />
-      <button className="tree-item" onClick={onSelect} title={node.file.relativePath}>
+      <div
+        className="tree-item"
+        title={node.file.relativePath}
+      >
         <KindIcon kind={node.file.kind} />
-        <span className="tree-name">{node.name}</span>
+        <span className="tree-name">{displayFileName(node.name)}</span>
         {dirty && <span className="dirty-dot" />}
         {node.hasError && (
           <span className="error-icon" title={diagnosticTitle}>
             <AlertCircle size={13} />
           </span>
         )}
-      </button>
-      <button
-        className="tree-drag-handle"
-        title="Move file"
-        ref={draggable.setActivatorNodeRef}
-        {...draggable.listeners}
-        {...draggable.attributes}
-      >
-        <GripVertical size={13} />
-      </button>
+      </div>
     </div>
   );
+}
+
+function InlineEditRow({
+  edit,
+  level,
+  onCancel,
+  onChange,
+  onCommit
+}: {
+  edit: InlineEditState;
+  level: number;
+  onCancel: () => void;
+  onChange: (name: string) => void;
+  onCommit: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const committed = useRef(false);
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const commitOnce = () => {
+    if (committed.current) return;
+    committed.current = true;
+    onCommit();
+  };
+
+  const kind = edit.mode === "rename" ? edit.target : edit.kind;
+
+  return (
+    <form
+      className="tree-row inline-edit-row"
+      style={{ "--tree-indent": `${level * 14}px` } as React.CSSProperties}
+      onSubmit={(event) => {
+        event.preventDefault();
+        commitOnce();
+      }}
+    >
+      <div className="tree-spacer" />
+      <div className="tree-item inline-edit-item">
+        {kind === "directory" || kind === "folder" ? <Folder size={14} /> : <KindIcon kind={kind} />}
+        <input
+          ref={inputRef}
+          value={edit.name}
+          onBlur={commitOnce}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              committed.current = true;
+              onCancel();
+            }
+          }}
+        />
+      </div>
+    </form>
+  );
+}
+
+function activateWithKeyboard(event: React.KeyboardEvent<HTMLElement>, action: () => void) {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  action();
+}
+
+function displayFileName(name: string) {
+  return name.replace(/\.ya?ml$/i, "");
+}
+
+function defaultCreateName(kind: CreateKind) {
+  if (kind === "folder") return "NewFolder";
+  return `New${capitalize(kind)}`;
+}
+
+function createRelativeName(kind: CreateKind, name: string) {
+  const clean = cleanInlineName(name);
+  if (kind === "folder") return clean;
+  return ensureYamlExtension(clean);
+}
+
+function renameRelativeName(target: EntryKind, name: string) {
+  const clean = cleanInlineName(name);
+  if (target === "directory") return clean;
+  return ensureYamlExtension(clean);
+}
+
+function cleanInlineName(name: string) {
+  return name.trim().replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+}
+
+function ensureYamlExtension(name: string) {
+  return /\.ya?ml$/i.test(name) ? name : `${name}.yaml`;
 }
 
 function KindIcon({ kind }: { kind: string }) {

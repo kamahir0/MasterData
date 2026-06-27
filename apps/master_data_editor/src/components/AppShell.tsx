@@ -89,9 +89,9 @@ export function AppShell() {
     allowCloseRef.current = true;
     if ("__TAURI_INTERNALS__" in window) {
       try {
-        await invoke("request_app_exit");
-      } catch {
         await getCurrentWindow().destroy();
+      } catch {
+        await invoke("request_app_exit");
       }
       return;
     }
@@ -131,13 +131,10 @@ export function AppShell() {
     void appWindow
       .onCloseRequested(async (event) => {
         if (allowCloseRef.current) return;
-        event.preventDefault();
         const state = useEditorStore.getState();
         const dirtyDocuments = Object.values(state.dirty).some(Boolean);
-        if (!state.projectSettingsDirty && !dirtyDocuments) {
-          await requestApplicationExit();
-          return;
-        }
+        if (!state.projectSettingsDirty && !dirtyDocuments) return;
+        event.preventDefault();
         const discard = await ask("Discard unsaved changes?", {
           title: "Unsaved Changes",
           kind: "warning",
