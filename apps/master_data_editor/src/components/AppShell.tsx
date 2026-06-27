@@ -18,9 +18,11 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useEditorStore } from "../store";
 import { BottomPanel, StatusStrip } from "./BottomPanel";
 import { EditorHost } from "./EditorHost";
@@ -65,26 +67,51 @@ export function AppShell() {
     activeView === "projectSettings" ? projectSettingsDirty : activeView === "document" && Boolean(activePath && dirty[activePath]);
   const hasUnsavedChanges = projectSettingsDirty || Object.values(dirty).some(Boolean);
 
-  const chooseProjectDirectory = async () => {
+  const chooseProjectSettingsFile = useCallback(async () => {
     try {
       const selected = await open({
-        directory: true,
+        directory: false,
+        filters: [{ name: "Lilja.MasterData Project Settings", extensions: ["yaml", "yml"] }],
         multiple: false,
-        title: "Open Lilja.MasterData Project"
+        title: "Open project-settings.yaml"
       });
       if (typeof selected === "string") {
         await openProject(selected);
         return;
       }
     } catch {
-      const path = window.prompt("Project root directory");
+      const path = window.prompt("project-settings.yaml path");
       if (path) await openProject(path);
     }
-  };
+  }, [openProject]);
+
+  const requestApplicationExit = useCallback(async () => {
+    allowCloseRef.current = true;
+    if ("__TAURI_INTERNALS__" in window) {
+      try {
+        await invoke("request_app_exit");
+      } catch {
+        await getCurrentWindow().destroy();
+      }
+      return;
+    }
+    window.close();
+  }, []);
 
   useEffect(() => {
     void loadPreferences();
   }, [loadPreferences]);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void listen("menu-open-project", () => {
+      void chooseProjectSettingsFile();
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => unlisten?.();
+  }, [chooseProjectSettingsFile]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -108,8 +135,7 @@ export function AppShell() {
         const state = useEditorStore.getState();
         const dirtyDocuments = Object.values(state.dirty).some(Boolean);
         if (!state.projectSettingsDirty && !dirtyDocuments) {
-          allowCloseRef.current = true;
-          await appWindow.destroy();
+          await requestApplicationExit();
           return;
         }
         const discard = await ask("Discard unsaved changes?", {
@@ -119,8 +145,7 @@ export function AppShell() {
           cancelLabel: "Cancel"
         });
         if (!discard) return;
-        allowCloseRef.current = true;
-        await appWindow.destroy();
+        await requestApplicationExit();
       })
       .then((dispose) => {
         unlisten = dispose;
@@ -129,7 +154,7 @@ export function AppShell() {
         unlisten = undefined;
       });
     return () => unlisten?.();
-  }, []);
+  }, [requestApplicationExit]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -190,10 +215,6 @@ export function AppShell() {
           <Database size={18} />
           <span>Lilja.MasterData Editor</span>
         </div>
-        <button className="project-command" onClick={() => void chooseProjectDirectory()} disabled={isBusy}>
-          <FolderOpen size={16} />
-          File / Open Project
-        </button>
         <div className="toolbar">
           <IconButton label="Undo" onClick={() => void undo()} icon={<Undo2 size={16} />} />
           <IconButton label="Redo" onClick={() => void redo()} icon={<Redo2 size={16} />} />
@@ -240,7 +261,7 @@ export function AppShell() {
           ) : (
             <WelcomePage
               isBusy={isBusy}
-              onOpenProject={chooseProjectDirectory}
+              onOpenProject={chooseProjectSettingsFile}
               onOpenRecent={(path) => void openProject(path)}
               recentProjects={recentProjects}
             />

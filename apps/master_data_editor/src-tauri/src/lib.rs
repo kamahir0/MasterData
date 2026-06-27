@@ -10,6 +10,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::{AppHandle, Emitter};
+
+const MENU_OPEN_PROJECT: &str = "file_open_project";
+const EVENT_OPEN_PROJECT: &str = "menu-open-project";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,6 +128,11 @@ struct CommandResult {
     ok: bool,
     message: String,
     diagnostics: Vec<EditorDiagnostic>,
+}
+
+#[tauri::command]
+fn request_app_exit(app: AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -340,7 +350,24 @@ fn save_preferences(preferences: EditorPreferences) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .menu(|app| {
+            let open_project = MenuItem::with_id(
+                app,
+                MENU_OPEN_PROJECT,
+                "Open Project...",
+                true,
+                Some("CmdOrCtrl+O"),
+            )?;
+            let file_menu = Submenu::with_items(app, "File", true, &[&open_project])?;
+            Menu::with_items(app, &[&file_menu])
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == MENU_OPEN_PROJECT {
+                let _ = app.emit(EVENT_OPEN_PROJECT, ());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            request_app_exit,
             open_project,
             reload_project,
             validate_editor_project,

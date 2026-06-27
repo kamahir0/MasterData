@@ -93,12 +93,6 @@ select {
   white-space: nowrap;
 }
 
-.project-command {
-  flex: 1;
-  max-width: 220px;
-  justify-content: flex-start;
-}
-
 .toolbar {
   display: flex;
   align-items: center;
@@ -294,11 +288,6 @@ select {
 
 .tree-row.directory {
   color: #2f4356;
-}
-
-.tree-row.root-directory {
-  margin-bottom: 2px;
-  color: #526274;
 }
 
 .tree-disclosure,

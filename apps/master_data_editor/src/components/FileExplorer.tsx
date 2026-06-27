@@ -173,19 +173,11 @@ export function FileExplorer() {
         </select>
       </div>
       <DndContext onDragEnd={handleDragEnd}>
-        <div className="tree-list" onContextMenu={(event) => openCreateMenu("", event)}>
-          <div
-            className={clsx("tree-row directory root-directory", rootDrop.isOver && "drop-target")}
-            ref={rootDrop.setNodeRef}
-            style={{ "--tree-indent": "0px" } as React.CSSProperties}
-            onContextMenu={(event) => openCreateMenu("", event)}
-          >
-            <div className="tree-spacer" />
-            <div className="tree-item directory-item" title={project?.masterRoot ?? "Master root"}>
-              <FolderOpen size={14} />
-              <span className="tree-name">master</span>
-            </div>
-          </div>
+        <div
+          className={clsx("tree-list", rootDrop.isOver && "drop-target")}
+          ref={rootDrop.setNodeRef}
+          onContextMenu={(event) => openCreateMenu("", event)}
+        >
           {tree.children.map((node) => (
             <TreeNodeView
               activePath={activePath}

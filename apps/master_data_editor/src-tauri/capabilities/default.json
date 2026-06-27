@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Default permissions for the main editor window.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "dialog:default"
+  ]
 }
