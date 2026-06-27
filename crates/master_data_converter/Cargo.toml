@@ -1,0 +1,15 @@
+[package]
+name = "master_data_converter"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "MasterDataConverter"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+master_data_core = { path = "../master_data_core" }

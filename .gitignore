@@ -1,0 +1,18 @@
+# Rust build output.
+/target/
+
+# Tauri editor frontend output and dependencies.
+/apps/master_data_editor/node_modules/
+/apps/master_data_editor/dist/
+/apps/master_data_editor/src-tauri/target/
+
+# Local converter output generated when running sample projects in this package.
+/.lilja/
+/dist/
+
+# macOS Finder metadata.
+.DS_Store
+
+# This package embeds a real C# project file as source. The parent repository
+# ignores *.csproj globally, so keep this explicit exception here.
+!embedded/builder/Lilja.MasterData.GeneratedBuilder.csproj

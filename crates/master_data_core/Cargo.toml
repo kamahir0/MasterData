@@ -1,0 +1,18 @@
+[package]
+name = "master_data_core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1"
+indexmap = { version = "2", features = ["serde"] }
+heck = "0.5"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+thiserror = "1"
+walkdir = "2"
