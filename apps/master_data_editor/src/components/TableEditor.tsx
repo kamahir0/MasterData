@@ -48,6 +48,12 @@ type SelectedStructCell = {
   typeName: string;
   visibleRowIndex: number;
 };
+type SelectedFlagsCell = {
+  fieldIndex: number;
+  originalIndex: number;
+  typeName: string;
+  visibleRowIndex: number;
+};
 type PopoverPosition = { left: number; top: number };
 
 export function TableEditor({ document }: { document: DefinitionDocument }) {
@@ -428,6 +434,7 @@ function RecordsGrid({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; index: number }>();
   const [activeCell, setActiveCell] = useState<ActiveCellState>();
   const [structCell, setStructCell] = useState<SelectedStructCell>();
+  const [flagsCell, setFlagsCell] = useState<SelectedFlagsCell>();
   const [popoverPosition, setPopoverPosition] = useState<PopoverPosition>();
   const structDefinitions = useMemo(() => structDefinitionMap(documents), [documents]);
   const availableTags = project?.availableTags ?? [];
@@ -497,6 +504,7 @@ function RecordsGrid({
     setSelectedRow({ visibleRowIndex, originalIndex });
     setActiveCell(undefined);
     setStructCell(undefined);
+    setFlagsCell(undefined);
   };
 
   const copyRowAt = (originalIndex: number) => {
@@ -539,10 +547,14 @@ function RecordsGrid({
   };
 
   const updatePopoverPosition = () => {
-    if (!structCell) return;
+    const popoverCell = structCell ?? flagsCell;
+    if (!popoverCell) {
+      setPopoverPosition(undefined);
+      return;
+    }
     const grid = scrollRef.current?.querySelector<HTMLElement>(".master-grid");
     const target = scrollRef.current?.querySelector<HTMLElement>(
-      `[data-grid-cell-row="${structCell.visibleRowIndex}"][data-grid-cell-field="${structCell.fieldIndex}"]`
+      `[data-grid-cell-row="${popoverCell.visibleRowIndex}"][data-grid-cell-field="${popoverCell.fieldIndex}"]`
     );
     if (!grid || !target) {
       setPopoverPosition(undefined);
@@ -558,7 +570,7 @@ function RecordsGrid({
 
   useEffect(() => {
     updatePopoverPosition();
-    if (!structCell || !scrollRef.current) return;
+    if ((!structCell && !flagsCell) || !scrollRef.current) return;
     const onScroll = () => window.requestAnimationFrame(updatePopoverPosition);
     const onResize = () => window.requestAnimationFrame(updatePopoverPosition);
     const scrollElement = scrollRef.current;
@@ -568,16 +580,36 @@ function RecordsGrid({
       scrollElement.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
     };
-  }, [structCell, rows]);
+  }, [flagsCell, structCell, rows]);
 
   useEffect(() => {
-    if (!structCell) return;
+    if (!structCell && !flagsCell) return;
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setStructCell(undefined);
+      if (event.key !== "Escape") return;
+      setStructCell(undefined);
+      setFlagsCell(undefined);
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [structCell]);
+  }, [flagsCell, structCell]);
+
+  useEffect(() => {
+    const popoverCell = structCell ?? flagsCell;
+    if (!popoverCell) return;
+    const close = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const activeCellElement = scrollRef.current?.querySelector<HTMLElement>(
+        `[data-grid-cell-row="${popoverCell.visibleRowIndex}"][data-grid-cell-field="${popoverCell.fieldIndex}"]`
+      );
+      const activePopoverElement = scrollRef.current?.querySelector<HTMLElement>("[data-cell-popover='true']");
+      if (activeCellElement?.contains(target) || activePopoverElement?.contains(target)) return;
+      setStructCell(undefined);
+      setFlagsCell(undefined);
+    };
+    window.addEventListener("pointerdown", close, true);
+    return () => window.removeEventListener("pointerdown", close, true);
+  }, [flagsCell, structCell]);
 
   const reorderColumn = (from: number, to: number) => {
     if (from < 0 || to < 0 || from === to) return;
@@ -803,15 +835,24 @@ function RecordsGrid({
     setSelectedRow(undefined);
     if (field === "tags") {
       setStructCell(undefined);
+      setFlagsCell(undefined);
       return;
     }
     const entry = rows[visibleRowIndex];
     const fieldDefinition = table.fields[field];
     if (entry && fieldDefinition && structDefinitions[fieldDefinition.type]) {
       setStructCell({ fieldIndex: field, originalIndex: entry.originalIndex, typeName: fieldDefinition.type, visibleRowIndex });
+      setFlagsCell(undefined);
+      return;
+    }
+    const enumInfo = fieldDefinition ? enumInfoForType(documents, fieldDefinition.type) : undefined;
+    if (entry && fieldDefinition && enumInfo?.flags) {
+      setFlagsCell({ fieldIndex: field, originalIndex: entry.originalIndex, typeName: fieldDefinition.type, visibleRowIndex });
+      setStructCell(undefined);
       return;
     }
     setStructCell(undefined);
+    setFlagsCell(undefined);
   };
 
   const focusGridCell = (visibleRowIndex: number, field: GridField, edit = false) => {
@@ -940,6 +981,9 @@ function RecordsGrid({
       focusRelativeGridInput(visibleRowIndex, "tags", event.shiftKey ? -1 : 1, 0);
     }
   };
+
+  const flagsField = flagsCell ? table.fields[flagsCell.fieldIndex] : undefined;
+  const flagsValue = flagsCell && flagsField ? formatValue(table.rows[flagsCell.originalIndex]?.data[flagsField.name]) : "";
 
   return (
     <section className="records-panel">
@@ -1113,6 +1157,7 @@ function RecordsGrid({
                     onFocus={() => {
                       setActiveGridCell(virtualRow.index, "tags", isTagEditing ? "edit" : "select");
                       setStructCell(undefined);
+                      setFlagsCell(undefined);
                     }}
                     onKeyDown={(event) => handleSelectedCellKeyDown(event, virtualRow.index, "tags")}
                     onMouseDown={(event) => {
@@ -1129,7 +1174,10 @@ function RecordsGrid({
                         suggestions={rowTagSuggestions}
                         value={rowTags}
                         onNavigateKeyDown={(event) => handleTagEditingKeyDown(event, virtualRow.index)}
-                        onFocus={() => setStructCell(undefined)}
+                        onFocus={() => {
+                          setStructCell(undefined);
+                          setFlagsCell(undefined);
+                        }}
                         onChange={(tags) =>
                           updateDocument(document.relativePath, "Edit row tags", (draft) => {
                             if (draft.definition.kind !== "table") return;
@@ -1163,6 +1211,7 @@ function RecordsGrid({
                     const isSelected = sameCell(activeCell, cell);
                     const isEditing = isSelected && activeCell?.mode === "edit";
                     const enumInfo = enumInfoForType(documents, field.type);
+                    const isFlagsEnum = Boolean(enumInfo?.flags);
                     const fieldIssues = cellIssues[fieldIndex];
                     const structDefinition = structDefinitions[field.type];
                     const placeholder = defaultPlaceholderForType(field.type, documents, structDefinitions);
@@ -1183,14 +1232,14 @@ function RecordsGrid({
                         data-grid-cell-row={virtualRow.index}
                         tabIndex={0}
                         title={fieldIssues.length > 0 ? fieldIssues.join("\n") : undefined}
-                        onDoubleClick={() => beginEditingCell(virtualRow.index, fieldIndex)}
+                        onDoubleClick={() => (isFlagsEnum ? focusGridCell(virtualRow.index, fieldIndex) : beginEditingCell(virtualRow.index, fieldIndex))}
                         onFocus={() => setActiveGridCell(virtualRow.index, fieldIndex, isEditing ? "edit" : "select")}
                         onKeyDown={(event) => handleSelectedCellKeyDown(event, virtualRow.index, fieldIndex)}
                         onMouseDown={(event) => {
                           if (event.target === event.currentTarget) focusGridCell(virtualRow.index, fieldIndex);
                         }}
                       >
-                        {isEditing ? (
+                        {isEditing && !isFlagsEnum ? (
                           enumInfo ? (
                             <EnumCellInput
                               dataGridField={fieldIndex}
@@ -1199,6 +1248,7 @@ function RecordsGrid({
                               options={enumInfo.members}
                               placeholder={placeholder}
                               value={formatValue(row.data[field.name])}
+                              zeroOption={enumInfo.defaultMemberName}
                               onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
                               onChange={(value) =>
                                 updateCell(document.relativePath, entry.originalIndex, field.name, value, {
@@ -1238,7 +1288,8 @@ function RecordsGrid({
                             type="button"
                             onMouseDown={(event) => {
                               event.preventDefault();
-                              beginEditingCell(virtualRow.index, fieldIndex);
+                              if (isFlagsEnum) focusGridCell(virtualRow.index, fieldIndex);
+                              else beginEditingCell(virtualRow.index, fieldIndex);
                             }}
                           >
                             {isEmptyCellValue(row.data[field.name]) ? (
@@ -1275,6 +1326,19 @@ function RecordsGrid({
               rowIndex={structCell.originalIndex}
               structDefinition={structDefinitions[structCell.typeName]}
               structDefinitions={structDefinitions}
+            />
+          )}
+          {flagsCell && popoverPosition && (
+            <FlagsEnumCellPopover
+              enumInfo={enumInfoForType(documents, flagsCell.typeName)}
+              field={flagsField}
+              onChange={(value) => {
+                if (!flagsField) return;
+                updateCell(document.relativePath, flagsCell.originalIndex, flagsField.name, value);
+              }}
+              onClose={() => setFlagsCell(undefined)}
+              position={popoverPosition}
+              value={flagsValue}
             />
           )}
         </div>
@@ -1379,7 +1443,8 @@ function EnumCellInput({
   onKeyDown,
   options,
   placeholder,
-  value
+  value,
+  zeroOption
 }: {
   dataGridField: number;
   dataGridRow: number;
@@ -1391,8 +1456,84 @@ function EnumCellInput({
   options: string[];
   placeholder: string;
   value: string;
+  zeroOption?: string;
 }) {
   const [focused, setFocused] = useState(false);
+  if (flags) {
+    const zero = zeroOption ?? placeholder;
+    const parts = enumValueParts(value);
+    const selected = new Set(parts);
+    const flagOptions = options.filter((option) => option !== zero);
+    const zeroSelected = parts.length === 0 || selected.has(zero);
+    const displayValue = parts.length === 0 ? "" : parts.join(", ");
+    const showMenu = focused;
+
+    const chooseZero = () => {
+      onChange(zero);
+      setFocused(false);
+    };
+
+    const toggleFlag = (option: string) => {
+      const next = new Set(parts.filter((part) => part !== zero));
+      if (next.has(option)) next.delete(option);
+      else next.add(option);
+      onChange(next.size === 0 ? zero : [...next].join(", "));
+    };
+
+    return (
+      <div className="enum-cell-input flags-cell-input">
+        <input
+          readOnly
+          className="grid-cell-input"
+          data-grid-field={dataGridField}
+          data-grid-row={dataGridRow}
+          placeholder={placeholder}
+          value={displayValue}
+          onBlur={() => {
+            onBlur();
+            window.setTimeout(() => setFocused(false), 120);
+          }}
+          onClick={() => setFocused(true)}
+          onFocus={() => {
+            setFocused(true);
+            onFocus();
+          }}
+          onKeyDown={(event) => {
+            onKeyDown(event);
+            if (event.defaultPrevented) return;
+            if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === " ") {
+              event.preventDefault();
+              setFocused(true);
+            }
+          }}
+        />
+        {showMenu && (
+          <div className="enum-cell-menu flags-cell-menu">
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={chooseZero}
+            >
+              <input readOnly checked={zeroSelected} type="checkbox" />
+              <span>{zero}</span>
+            </button>
+            {flagOptions.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => toggleFlag(option)}
+              >
+                <input readOnly checked={!zeroSelected && selected.has(option)} type="checkbox" />
+                <span>{option}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const query = flags ? value.split(",").at(-1)?.trim() ?? "" : value.trim();
   const candidates = options.filter((option) => !query || option.toLowerCase().includes(query.toLowerCase()));
   const showCandidates = focused && candidates.length > 0;
@@ -1449,6 +1590,76 @@ function replaceLastEnumSegment(value: string, option: string) {
   return parts.map((part, index) => (index === 0 ? part.trim() : part.trim())).filter(Boolean).join(", ");
 }
 
+function enumValueParts(value: string) {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function FlagsEnumCellPopover({
+  enumInfo,
+  field,
+  onChange,
+  onClose,
+  position,
+  value
+}: {
+  enumInfo?: EnumInfo;
+  field?: FieldDefinition;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  position: PopoverPosition;
+  value: string;
+}) {
+  if (!field || !enumInfo?.flags) return null;
+  const zero = enumInfo.defaultMemberName ?? "None";
+  const parts = enumValueParts(value);
+  const selected = new Set(parts);
+  const flagOptions = enumInfo.members.filter((option) => option !== zero);
+  const zeroSelected = parts.length === 0 || selected.has(zero);
+
+  const chooseZero = () => {
+    onChange(zero);
+  };
+
+  const toggleFlag = (option: string) => {
+    const next = new Set(parts.filter((part) => part !== zero));
+    if (next.has(option)) next.delete(option);
+    else next.add(option);
+    onChange(next.size === 0 ? zero : [...next].join(", "));
+  };
+
+  return (
+    <div
+      className="struct-cell-popover flags-cell-popover"
+      data-cell-popover="true"
+      style={{ left: position.left, top: position.top }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <div className="struct-cell-title">
+        <strong>{field.name}</strong>
+        <span>Flags</span>
+        <button className="icon-button" title="Close" onClick={onClose}>
+          ×
+        </button>
+      </div>
+      <div className="flags-cell-options">
+        <button type="button" onClick={chooseZero}>
+          <input readOnly checked={zeroSelected} type="checkbox" />
+          <span>{zero}</span>
+        </button>
+        {flagOptions.map((option) => (
+          <button key={option} type="button" onClick={() => toggleFlag(option)}>
+            <input readOnly checked={!zeroSelected && selected.has(option)} type="checkbox" />
+            <span>{option}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StructCellPopover({
   document,
   field,
@@ -1497,6 +1708,7 @@ function StructCellPopover({
   return (
     <div
       className="struct-cell-popover"
+      data-cell-popover="true"
       style={{ left: position.left, top: position.top }}
       onPointerDown={(event) => event.stopPropagation()}
     >

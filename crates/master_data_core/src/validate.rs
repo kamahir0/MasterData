@@ -260,15 +260,48 @@ fn validate_enum(
                 .at(&source.source.path),
             );
         }
-        if let EnumMember::WithValue { value, .. } = member {
-            if *value == 0 {
-                has_explicit_zero = true;
-            }
-            if !values.insert(*value) {
+        match member {
+            EnumMember::Name(_) if value.flags => {
                 bag.push(
-                    Diagnostic::error("LMD0208", format!("duplicate enum value `{value}`"))
-                        .at(&source.source.path),
+                    Diagnostic::error(
+                        "LMD0210",
+                        format!(
+                            "flags enum member `{}` must declare an explicit power-of-two value",
+                            member.name()
+                        ),
+                    )
+                    .at(&source.source.path),
                 );
+            }
+            EnumMember::Name(_) => {}
+            EnumMember::WithValue {
+                value: member_value,
+                ..
+            } => {
+                if *member_value == 0 {
+                    has_explicit_zero = true;
+                }
+                if value.flags && *member_value != 0 && !is_power_of_two(*member_value) {
+                    bag.push(
+                        Diagnostic::error(
+                            "LMD0211",
+                            format!(
+                                "flags enum member `{}` value `{member_value}` must be a power of two",
+                                member.name()
+                            ),
+                        )
+                        .at(&source.source.path),
+                    );
+                }
+                if !values.insert(*member_value) {
+                    bag.push(
+                        Diagnostic::error(
+                            "LMD0208",
+                            format!("duplicate enum value `{member_value}`"),
+                        )
+                        .at(&source.source.path),
+                    );
+                }
             }
         }
     }
@@ -281,6 +314,10 @@ fn validate_enum(
             .at(&source.source.path),
         );
     }
+}
+
+fn is_power_of_two(value: i64) -> bool {
+    value > 0 && (value & (value - 1)) == 0
 }
 
 fn validate_struct(
@@ -1412,6 +1449,40 @@ rows:
         );
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn flags_enum_rejects_implicit_member_values() {
+        let result = validate(
+            parse_all(&[r#"kind: enum
+name: Permission
+flags: true
+members:
+  - Read
+"#]),
+            None,
+            &[],
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn flags_enum_rejects_non_power_of_two_values() {
+        let result = validate(
+            parse_all(&[r#"kind: enum
+name: Permission
+flags: true
+members:
+  - { name: None, value: 0 }
+  - { name: Read, value: 1 }
+  - { name: ReadWrite, value: 3 }
+"#]),
+            None,
+            &[],
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

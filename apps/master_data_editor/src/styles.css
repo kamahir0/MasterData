@@ -1333,8 +1333,52 @@ select {
   padding: 0 8px;
 }
 
+.flags-cell-menu button {
+  gap: 8px;
+}
+
+.flags-cell-menu input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  padding: 0;
+}
+
 .enum-cell-menu button:hover {
   background: #edf4fb;
+}
+
+.flags-cell-popover {
+  width: 240px;
+}
+
+.flags-cell-options {
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  padding: 6px;
+}
+
+.flags-cell-options button {
+  justify-content: flex-start;
+  gap: 8px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #253140;
+  padding: 0 8px;
+}
+
+.flags-cell-options button:hover {
+  background: #edf4fb;
+}
+
+.flags-cell-options input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  padding: 0;
 }
 
 .grid-row .tag-cell-editor {
@@ -1743,6 +1787,22 @@ select {
   grid-template-columns: minmax(240px, 420px) 160px 30px;
 }
 
+.flags-enum-row {
+  grid-template-columns: minmax(240px, 420px) 160px 160px 30px;
+}
+
+.enum-bit-label,
+.enum-value-preview {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  color: #536272;
+}
+
+.enum-value-preview {
+  font-variant-numeric: tabular-nums;
+}
+
 .struct-row {
   grid-template-columns: minmax(240px, 420px) 220px 92px 30px;
 }
@@ -2036,6 +2096,7 @@ select {
 
 :root[data-theme="dark"] .tag-token-menu button,
 :root[data-theme="dark"] .enum-cell-menu button,
+:root[data-theme="dark"] .flags-cell-options button,
 :root[data-theme="dark"] .context-menu button,
 :root[data-theme="dark"] .tree-create-menu button,
 :root[data-theme="dark"] .status-strip button {
@@ -2044,6 +2105,7 @@ select {
 
 :root[data-theme="dark"] .tag-token-menu button:hover,
 :root[data-theme="dark"] .enum-cell-menu button:hover,
+:root[data-theme="dark"] .flags-cell-options button:hover,
 :root[data-theme="dark"] .context-menu button:hover,
 :root[data-theme="dark"] .tree-create-menu button:hover,
 :root[data-theme="dark"] .grid-cell-display:hover,
