@@ -2,7 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
-$ReleaseDir = Join-Path $AppRoot "src-tauri\target\release"
+$WorkspaceRoot = Resolve-Path (Join-Path $AppRoot "..\..")
+$ReleaseDir = Join-Path $WorkspaceRoot "target\release"
 
 Set-Location $AppRoot
 

@@ -16,3 +16,6 @@
 # This package embeds a real C# project file as source. The parent repository
 # ignores *.csproj globally, so keep this explicit exception here.
 !embedded/builder/Lilja.MasterData.GeneratedBuilder.csproj
+
+# Tauri v2 generated schemas and templates.
+/apps/master_data_editor/src-tauri/gen/
