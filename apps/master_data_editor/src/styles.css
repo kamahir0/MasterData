@@ -1,10 +1,146 @@
 :root {
   color-scheme: light;
+  --color-app-bg: #f3f6f8;
+  --color-workspace-bg: #eef2f6;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f8fafc;
+  --color-surface-muted: #f4f7fa;
+  --color-surface-raised: #f9fbfd;
+  --color-hover: #edf3f8;
+  --color-hover-strong: #edf4fb;
+  --color-text: #1c2430;
+  --color-text-strong: #162231;
+  --color-text-heading: #223040;
+  --color-text-muted: #607080;
+  --color-text-soft: #7b8794;
+  --color-border: #d5dde6;
+  --color-border-soft: #e3e9ef;
+  --color-border-strong: #c8d0d9;
+  --color-border-emphasis: #9fb4c9;
+  --color-accent: #2f7fbd;
+  --color-accent-action: #246fa8;
+  --color-accent-action-hover: #1f6599;
+  --color-accent-action-border: #1f6599;
+  --color-accent-action-border-hover: #18577f;
+  --color-selection-bg: #dceaf8;
+  --color-selection-text: #0f4975;
+  --color-drop-bg: #e8f1f9;
+  --color-grid-bg: #ffffff;
+  --color-grid-fill: #fbfcfe;
+  --color-row-head-bg: #f8fafc;
+  --color-row-selected-bg: #f5fbff;
+  --color-placeholder: #9aa7b3;
+  --color-warning-bg: #fff8e8;
+  --color-warning-text: #7b4b00;
+  --color-warning-line: #8a5a00;
+  --color-danger-bg: #fff0ed;
+  --color-danger-text: #bf3322;
+  --color-danger-border: #e2a69b;
+  --color-ref-bg: #e1ead2;
+  --color-ref-text: #3b6415;
+  --color-secondary-bg: #eef7ff;
+  --color-secondary-text: #0f528a;
+  --shadow-popover: 0 12px 28px rgba(31, 45, 61, 0.18);
+  --shadow-popover-strong: 0 12px 30px rgba(31, 45, 61, 0.2);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 13px;
-  color: #1c2430;
-  background: #f3f6f8;
+  color: var(--color-text);
+  background: var(--color-app-bg);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-app-bg: #121820;
+  --color-workspace-bg: #161d26;
+  --color-surface: #1d2630;
+  --color-surface-alt: #202a35;
+  --color-surface-muted: #26313d;
+  --color-surface-raised: #242f3a;
+  --color-hover: #2a3846;
+  --color-hover-strong: #304153;
+  --color-text: #d9e2ec;
+  --color-text-strong: #eef4fa;
+  --color-text-heading: #f4f7fb;
+  --color-text-muted: #a9b6c4;
+  --color-text-soft: #8796a6;
+  --color-border: #344353;
+  --color-border-soft: #2f3c49;
+  --color-border-strong: #435467;
+  --color-border-emphasis: #5d748b;
+  --color-accent: #69aee8;
+  --color-accent-action: #3178b5;
+  --color-accent-action-hover: #3b8acb;
+  --color-accent-action-border: #3f8ac3;
+  --color-accent-action-border-hover: #5aa2dc;
+  --color-selection-bg: #183d5d;
+  --color-selection-text: #d7ecff;
+  --color-drop-bg: #223b50;
+  --color-grid-bg: #1c2530;
+  --color-grid-fill: #19212b;
+  --color-row-head-bg: #202a35;
+  --color-row-selected-bg: #21394f;
+  --color-placeholder: #778798;
+  --color-warning-bg: #3a2d13;
+  --color-warning-text: #ffd68a;
+  --color-warning-line: #e2b55d;
+  --color-danger-bg: #3a201d;
+  --color-danger-text: #ff9b8c;
+  --color-danger-border: #8d4b43;
+  --color-ref-bg: #25361f;
+  --color-ref-text: #b7dfa0;
+  --color-secondary-bg: #1b3449;
+  --color-secondary-text: #9bcfff;
+  --shadow-popover: 0 14px 34px rgba(0, 0, 0, 0.36);
+  --shadow-popover-strong: 0 16px 38px rgba(0, 0, 0, 0.44);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --color-app-bg: #121820;
+    --color-workspace-bg: #161d26;
+    --color-surface: #1d2630;
+    --color-surface-alt: #202a35;
+    --color-surface-muted: #26313d;
+    --color-surface-raised: #242f3a;
+    --color-hover: #2a3846;
+    --color-hover-strong: #304153;
+    --color-text: #d9e2ec;
+    --color-text-strong: #eef4fa;
+    --color-text-heading: #f4f7fb;
+    --color-text-muted: #a9b6c4;
+    --color-text-soft: #8796a6;
+    --color-border: #344353;
+    --color-border-soft: #2f3c49;
+    --color-border-strong: #435467;
+    --color-border-emphasis: #5d748b;
+    --color-accent: #69aee8;
+    --color-accent-action: #3178b5;
+    --color-accent-action-hover: #3b8acb;
+    --color-accent-action-border: #3f8ac3;
+    --color-accent-action-border-hover: #5aa2dc;
+    --color-selection-bg: #183d5d;
+    --color-selection-text: #d7ecff;
+    --color-drop-bg: #223b50;
+    --color-grid-bg: #1c2530;
+    --color-grid-fill: #19212b;
+    --color-row-head-bg: #202a35;
+    --color-row-selected-bg: #21394f;
+    --color-placeholder: #778798;
+    --color-warning-bg: #3a2d13;
+    --color-warning-text: #ffd68a;
+    --color-warning-line: #e2b55d;
+    --color-danger-bg: #3a201d;
+    --color-danger-text: #ff9b8c;
+    --color-danger-border: #8d4b43;
+    --color-ref-bg: #25361f;
+    --color-ref-text: #b7dfa0;
+    --color-secondary-bg: #1b3449;
+    --color-secondary-text: #9bcfff;
+    --shadow-popover: 0 14px 34px rgba(0, 0, 0, 0.36);
+    --shadow-popover-strong: 0 16px 38px rgba(0, 0, 0, 0.44);
+  }
 }
 
 * {
@@ -14,6 +150,8 @@
 body {
   margin: 0;
   overflow: hidden;
+  color: var(--color-text);
+  background: var(--color-app-bg);
 }
 
 button,
@@ -23,9 +161,9 @@ select {
 }
 
 button {
-  border: 1px solid #c8d0d9;
-  background: #ffffff;
-  color: #1d2b3a;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-strong);
   border-radius: 6px;
   height: 30px;
   padding: 0 10px;
@@ -36,8 +174,8 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #edf3f8;
-  border-color: #9fb4c9;
+  background: var(--color-hover);
+  border-color: var(--color-border-emphasis);
 }
 
 button:disabled {
@@ -47,9 +185,9 @@ button:disabled {
 
 input,
 select {
-  border: 1px solid #c8d0d9;
-  background: #ffffff;
-  color: #162231;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-strong);
   height: 30px;
   border-radius: 5px;
   padding: 0 8px;
@@ -1646,4 +1784,294 @@ select {
 
 .muted {
   color: #7b8794;
+}
+
+:root[data-theme="dark"] button,
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+}
+
+:root[data-theme="dark"] button:hover:not(:disabled) {
+  background: var(--color-hover);
+  border-color: var(--color-border-emphasis);
+}
+
+:root[data-theme="dark"] .app-shell,
+:root[data-theme="dark"] .editor-pane,
+:root[data-theme="dark"] .welcome-page {
+  background: var(--color-workspace-bg);
+  color: var(--color-text);
+}
+
+:root[data-theme="dark"] .topbar,
+:root[data-theme="dark"] .editor-header,
+:root[data-theme="dark"] .welcome-card,
+:root[data-theme="dark"] .recent-projects,
+:root[data-theme="dark"] .tree-create-menu,
+:root[data-theme="dark"] .context-menu,
+:root[data-theme="dark"] .tag-token-menu,
+:root[data-theme="dark"] .enum-cell-menu,
+:root[data-theme="dark"] .struct-cell-popover,
+:root[data-theme="dark"] .records-panel,
+:root[data-theme="dark"] .simple-editor,
+:root[data-theme="dark"] .settings-editor,
+:root[data-theme="dark"] .bottom-panel,
+:root[data-theme="dark"] .status-strip {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+:root[data-theme="dark"] .sidebar,
+:root[data-theme="dark"] .table-settings,
+:root[data-theme="dark"] .table-settings-toggle,
+:root[data-theme="dark"] .enum-options,
+:root[data-theme="dark"] .simple-add-row .icon-button,
+:root[data-theme="dark"] .row-head,
+:root[data-theme="dark"] .grid-header,
+:root[data-theme="dark"] .grid-add-field-head,
+:root[data-theme="dark"] .struct-cell-title {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+:root[data-theme="dark"] .schema-panel {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border);
+}
+
+:root[data-theme="dark"] .schema-card {
+  background: var(--color-surface-raised);
+  border-color: var(--color-border-strong);
+}
+
+:root[data-theme="dark"] .panel-title,
+:root[data-theme="dark"] .section-heading,
+:root[data-theme="dark"] .table-settings-toggle,
+:root[data-theme="dark"] .settings-section h3,
+:root[data-theme="dark"] .welcome-card h1,
+:root[data-theme="dark"] .empty-state h1,
+:root[data-theme="dark"] .bottom-tab.active {
+  color: var(--color-text-heading);
+}
+
+:root[data-theme="dark"] .editor-header span,
+:root[data-theme="dark"] .doc-kind,
+:root[data-theme="dark"] .welcome-card p,
+:root[data-theme="dark"] .empty-state,
+:root[data-theme="dark"] .zoom-label,
+:root[data-theme="dark"] .tree-menu-title,
+:root[data-theme="dark"] .context-menu-title,
+:root[data-theme="dark"] .settings-field > span,
+:root[data-theme="dark"] .struct-cell-title span,
+:root[data-theme="dark"] .struct-cell-field > span,
+:root[data-theme="dark"] .ref-mapping-row span,
+:root[data-theme="dark"] .records-heading span,
+:root[data-theme="dark"] .bottom-tab,
+:root[data-theme="dark"] .status-strip,
+:root[data-theme="dark"] .recent-row,
+:root[data-theme="dark"] .muted {
+  color: var(--color-text-muted);
+}
+
+:root[data-theme="dark"] .tree-sortbar,
+:root[data-theme="dark"] .file-tree .panel-title,
+:root[data-theme="dark"] .records-heading,
+:root[data-theme="dark"] .simple-heading,
+:root[data-theme="dark"] .enum-options,
+:root[data-theme="dark"] .settings-section,
+:root[data-theme="dark"] .bottom-tabs,
+:root[data-theme="dark"] .bottom-panel,
+:root[data-theme="dark"] .status-strip {
+  border-color: var(--color-border);
+}
+
+:root[data-theme="dark"] .tree-row.directory {
+  color: var(--color-text);
+}
+
+:root[data-theme="dark"] .tree-row.active,
+:root[data-theme="dark"] .row-head.selected {
+  background: var(--color-selection-bg);
+  color: var(--color-selection-text);
+}
+
+:root[data-theme="dark"] .tree-row.drop-target {
+  background: var(--color-drop-bg);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+:root[data-theme="dark"] .tree-disclosure,
+:root[data-theme="dark"] .tree-drag-handle,
+:root[data-theme="dark"] .drag-handle {
+  color: var(--color-text-soft);
+}
+
+:root[data-theme="dark"] .inline-edit-item input,
+:root[data-theme="dark"] .tag-token-input,
+:root[data-theme="dark"] .struct-cell-field textarea,
+:root[data-theme="dark"] .grid-cell-shell.editing .grid-cell-input {
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+  border-color: var(--color-border-emphasis);
+}
+
+:root[data-theme="dark"] .tag-token-input.is-focused {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(105, 174, 232, 0.18);
+}
+
+:root[data-theme="dark"] .tag-token {
+  background: #21394f;
+  border-color: #3d5f7c;
+  color: #cde9ff;
+}
+
+:root[data-theme="dark"] .tag-token-dropdown {
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+:root[data-theme="dark"] .tag-token-menu,
+:root[data-theme="dark"] .enum-cell-menu,
+:root[data-theme="dark"] .tree-create-menu {
+  box-shadow: var(--shadow-popover);
+}
+
+:root[data-theme="dark"] .context-menu,
+:root[data-theme="dark"] .struct-cell-popover {
+  box-shadow: var(--shadow-popover-strong);
+}
+
+:root[data-theme="dark"] .tag-token-menu button,
+:root[data-theme="dark"] .enum-cell-menu button,
+:root[data-theme="dark"] .context-menu button,
+:root[data-theme="dark"] .tree-create-menu button,
+:root[data-theme="dark"] .status-strip button {
+  color: var(--color-text);
+}
+
+:root[data-theme="dark"] .tag-token-menu button:hover,
+:root[data-theme="dark"] .enum-cell-menu button:hover,
+:root[data-theme="dark"] .context-menu button:hover,
+:root[data-theme="dark"] .tree-create-menu button:hover,
+:root[data-theme="dark"] .grid-cell-display:hover,
+:root[data-theme="dark"] .tag-cell-display:hover,
+:root[data-theme="dark"] .diagnostic-line:hover {
+  background: var(--color-hover-strong);
+}
+
+:root[data-theme="dark"] .grid-header,
+:root[data-theme="dark"] .grid-col-head,
+:root[data-theme="dark"] .meta-head,
+:root[data-theme="dark"] .grid-header > .row-head,
+:root[data-theme="dark"] .grid-add-field-head {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border);
+}
+
+:root[data-theme="dark"] .grid-cell,
+:root[data-theme="dark"] .tag-cell,
+:root[data-theme="dark"] .grid-add-field-cell {
+  background: var(--color-grid-bg);
+  border-color: var(--color-border-soft);
+}
+
+:root[data-theme="dark"] .grid-add-row-fill {
+  background: var(--color-grid-fill);
+  border-color: var(--color-border-soft);
+}
+
+:root[data-theme="dark"] .grid-row.row-selected .row-head,
+:root[data-theme="dark"] .grid-row.row-selected .tag-cell,
+:root[data-theme="dark"] .grid-row.row-selected .grid-cell,
+:root[data-theme="dark"] .grid-row.row-selected .grid-add-field-cell {
+  background: var(--color-row-selected-bg);
+}
+
+:root[data-theme="dark"] .grid-cell:focus,
+:root[data-theme="dark"] .tag-cell:focus,
+:root[data-theme="dark"] .grid-cell-shell.selected,
+:root[data-theme="dark"] .grid-cell-shell.editing,
+:root[data-theme="dark"] .grid-row.row-selected::after,
+:root[data-theme="dark"] .row-head.selected {
+  outline-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+:root[data-theme="dark"] .grid-row.row-selected::after {
+  border-color: var(--color-accent);
+}
+
+:root[data-theme="dark"] .cell-placeholder,
+:root[data-theme="dark"] .tag-placeholder {
+  color: var(--color-placeholder);
+}
+
+:root[data-theme="dark"] .primary-col,
+:root[data-theme="dark"] .badge.primary {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+:root[data-theme="dark"] .secondary-col,
+:root[data-theme="dark"] .badge.secondary {
+  background: var(--color-secondary-bg);
+  color: var(--color-secondary-text);
+}
+
+:root[data-theme="dark"] .badge.ref {
+  background: var(--color-ref-bg);
+  color: var(--color-ref-text);
+}
+
+:root[data-theme="dark"] .badge.key {
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+:root[data-theme="dark"] .badge.key.duplicate,
+:root[data-theme="dark"] .key-button.duplicate,
+:root[data-theme="dark"] .row-error,
+:root[data-theme="dark"] .error-strip {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  border-color: var(--color-danger-border);
+}
+
+:root[data-theme="dark"] .danger-icon,
+:root[data-theme="dark"] .context-menu .danger-menu-item,
+:root[data-theme="dark"] .diagnostic-line.error,
+:root[data-theme="dark"] .error-icon,
+:root[data-theme="dark"] .row-error-marker {
+  color: var(--color-danger-text);
+}
+
+:root[data-theme="dark"] .diagnostic-line.warning {
+  color: var(--color-warning-line);
+}
+
+:root[data-theme="dark"] .primary-action {
+  background: var(--color-accent-action);
+  border-color: var(--color-accent-action-border);
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .primary-action:hover:not(:disabled) {
+  background: var(--color-accent-action-hover);
+  border-color: var(--color-accent-action-border-hover);
+}
+
+:root[data-theme="dark"] .gap-marker {
+  background: var(--color-accent);
+}
+
+:root[data-theme="dark"] ::selection {
+  background: #315f86;
+  color: #ffffff;
 }

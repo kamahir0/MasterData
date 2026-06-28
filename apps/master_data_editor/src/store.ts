@@ -141,7 +141,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const preferences = await api.getPreferences();
       set({
-        theme: preferences.theme ?? "system",
+        theme: normalizeTheme(preferences.theme),
         zoom: preferences.zoom ?? 1,
         gridFontSize: preferences.gridFontSize ?? 13,
         sidebarVisible: preferences.sidebarVisible ?? true,
@@ -491,7 +491,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ profilePreview: profile || undefined });
   },
   setTheme(theme) {
-    set({ theme });
+    set({ theme: normalizeTheme(theme) });
     void persistPreferences();
   },
   setGridFontSize(fontSize) {
@@ -593,6 +593,10 @@ async function persistPreferences() {
   } catch {
     // Preference writes should not interrupt editing.
   }
+}
+
+function normalizeTheme(theme: string | undefined) {
+  return theme === "light" || theme === "dark" || theme === "system" ? theme : "system";
 }
 
 async function runFileTransaction(entry: FileHistoryEntry) {

@@ -58,6 +58,7 @@ export function AppShell() {
     setSidebarVisible,
     sidebarVisible,
     sync,
+    theme,
     undo,
     validate,
     zoom,
@@ -101,6 +102,20 @@ export function AppShell() {
   useEffect(() => {
     void loadPreferences();
   }, [loadPreferences]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      const effectiveTheme = theme === "dark" || (theme === "system" && media.matches) ? "dark" : "light";
+      document.documentElement.dataset.theme = effectiveTheme;
+      document.documentElement.dataset.themePreference = theme;
+      document.documentElement.style.colorScheme = effectiveTheme;
+    };
+    applyTheme();
+    if (theme !== "system") return;
+    media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
+  }, [theme]);
 
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
