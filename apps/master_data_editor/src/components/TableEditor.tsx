@@ -1,4 +1,4 @@
-import { AlertCircle, ChevronDown, ChevronRight, GripVertical, Link2, Plus, Table2, Tags, Trash2 } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, GripVertical, Plus, Table2, Tags, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
@@ -21,7 +21,7 @@ import {
 } from "../editorUtils";
 import type { DefinitionDocument, FieldDefinition, MasterRefDefinition, MasterValue, RowDefinition, StructDefinition, TableDefinition } from "../types";
 import { EditorHeader } from "./EditorHost";
-import { TagTokenInput, uniqueTags } from "./TagTokenInput";
+import { isValidTagName, TagTokenInput, uniqueTags } from "./TagTokenInput";
 
 const ROW_NUMBER_WIDTH = 64;
 const META_TAGS_WIDTH = 180;
@@ -36,6 +36,12 @@ type ActiveCellState = ActiveCell & { mode: "select" | "edit" };
 type SelectedRowState = { visibleRowIndex: number; originalIndex: number };
 type TableCreateEvent = { kind: "field" | "record" };
 type TableIndexedMenuEvent = { action: string; index: number };
+type EnumInfo = {
+  flags: boolean;
+  members: string[];
+  hasZeroDefault: boolean;
+  defaultMemberName?: string;
+};
 type SelectedStructCell = {
   fieldIndex: number;
   originalIndex: number;
@@ -138,10 +144,6 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
           <div className="table-settings-section">
             <div className="settings-section-title compact-title">
               <h3>Secondary Keys</h3>
-              <button className="secondary-button compact" onClick={addSecondary}>
-                <Plus size={14} />
-                Add
-              </button>
             </div>
             <div className="secondary-key-list">
               {(table.keys.secondary ?? []).map((key, index) => (
@@ -165,16 +167,18 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
                 </div>
               ))}
               {(table.keys.secondary ?? []).length === 0 && <span className="muted">No secondary keys.</span>}
+              <div className="list-add-row">
+                <button className="secondary-button compact list-add-button" onClick={addSecondary}>
+                  <Plus size={14} />
+                  Add
+                </button>
+              </div>
             </div>
           </div>
 
           <div className="table-settings-section">
             <div className="settings-section-title compact-title">
               <h3>MasterRef</h3>
-              <button className="secondary-button compact" disabled={tableDocuments.length === 0} onClick={addRef}>
-                <Link2 size={14} />
-                Add
-              </button>
             </div>
             <div className="master-ref-list">
               {(table.refs ?? []).map((reference, index) => (
@@ -188,6 +192,12 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
                 />
               ))}
               {(table.refs ?? []).length === 0 && <span className="muted">No MasterRef definitions.</span>}
+              <div className="list-add-row">
+                <button className="secondary-button compact list-add-button" disabled={tableDocuments.length === 0} onClick={addRef}>
+                  <Plus size={14} />
+                  Add
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -237,10 +247,12 @@ function KeyFieldsEditor({
           </button>
         </div>
       ))}
-      <button className="secondary-button compact" disabled={availableFields.length === 0} onClick={() => onChange([...fields, availableFields[0]])}>
-        <Plus size={13} />
-        Field
-      </button>
+      <div className="list-add-row">
+        <button className="secondary-button compact list-add-button" disabled={availableFields.length === 0} onClick={() => onChange([...fields, availableFields[0]])}>
+          <Plus size={13} />
+          Add
+        </button>
+      </div>
     </div>
   );
 }
@@ -434,6 +446,8 @@ function RecordsGrid({
   const [rowClipboard, setRowClipboard] = useState<RowDefinition>();
   const [rowContextMenu, setRowContextMenu] = useState<{ x: number; y: number; visibleRowIndex: number; originalIndex: number }>();
   const [recordsCreateMenu, setRecordsCreateMenu] = useState<{ x: number; y: number }>();
+  const inputGroups = useRef<Record<string, string | undefined>>({});
+  const inputGroupSeq = useRef(0);
 
   useEffect(() => {
     rowVirtualizer.measure();
@@ -642,7 +656,17 @@ function RecordsGrid({
     setContextMenu({ x, y, index });
   };
 
-  const renameField = (index: number, nextName: string) => {
+  const beginInputGroup = (key: string) => {
+    inputGroups.current[key] = `${document.relativePath}:table:${key}:${inputGroupSeq.current++}`;
+  };
+
+  const endInputGroup = (key: string) => {
+    inputGroups.current[key] = undefined;
+  };
+
+  const inputGroup = (key: string) => inputGroups.current[key];
+
+  const renameField = (index: number, nextName: string, historyGroup?: string) => {
     const oldName = table.fields[index].name;
     updateDocument(document.relativePath, `Rename field ${oldName}`, (draft) => {
       if (draft.definition.kind !== "table") return;
@@ -661,7 +685,7 @@ function RecordsGrid({
           if (mapping.local === oldName) mapping.local = nextName;
         }
       }
-    });
+    }, { historyGroup });
   };
 
   const addField = () => {
@@ -966,7 +990,9 @@ function RecordsGrid({
                 <input
                   className="column-name-input"
                   value={field.name}
-                  onChange={(event) => renameField(index, event.target.value)}
+                  onBlur={() => endInputGroup(`column-name-${index}`)}
+                  onChange={(event) => renameField(index, event.target.value, inputGroup(`column-name-${index}`))}
+                  onFocus={() => beginInputGroup(`column-name-${index}`)}
                   onPointerDown={(event) => event.stopPropagation()}
                 />
                 <select
@@ -1036,6 +1062,14 @@ function RecordsGrid({
               const isTagEditing = isTagActive && activeCell?.mode === "edit";
               const primaryKey = table.keys.primary.fields.map((field) => String(row.data[field] ?? "")).join("|");
               const hasDuplicatePrimaryKey = duplicateKeys.has(primaryKey);
+              const tagIssues = rowTagIssues(rowTags, availableTags);
+              const cellIssues = table.fields.map((field) => cellIssuesForField(field, row.data[field.name], documents, structDefinitions));
+              const rowIssues = [
+                ...(hasDuplicatePrimaryKey ? [`Duplicate primary key: ${primaryKey || "(empty)"}`] : []),
+                ...tagIssues,
+                ...cellIssues.flat()
+              ];
+              const hasRowIssue = rowIssues.length > 0;
               const isRowSelected = selectedRow?.originalIndex === entry.originalIndex;
               return (
                 <div
@@ -1048,14 +1082,14 @@ function RecordsGrid({
                   }}
                 >
                   <div
-                    className={clsx("row-head", hasDuplicatePrimaryKey && "row-error", isRowSelected && "selected")}
+                    className={clsx("row-head", hasRowIssue && "row-error", isRowSelected && "selected")}
                     onClick={() => selectRow(virtualRow.index, entry.originalIndex)}
                     onContextMenu={(event) => openRecordMenu(event, virtualRow.index, entry.originalIndex)}
                     tabIndex={0}
                   >
                     <span>{entry.originalIndex + 1}</span>
-                    {hasDuplicatePrimaryKey && (
-                      <span className="row-error-marker" title={`Duplicate primary key: ${primaryKey || "(empty)"}`}>
+                    {hasRowIssue && (
+                      <span className="row-error-marker" title={rowIssues.join("\n")}>
                         <AlertCircle size={13} />
                       </span>
                     )}
@@ -1070,10 +1104,11 @@ function RecordsGrid({
                     </button>
                   </div>
                   <div
-                    className={clsx("tag-cell", "grid-cell-shell", isTagActive && "selected", isTagEditing && "editing")}
+                    className={clsx("tag-cell", "grid-cell-shell", tagIssues.length > 0 && "invalid", isTagActive && "selected", isTagEditing && "editing")}
                     data-grid-cell-field="tags"
                     data-grid-cell-row={virtualRow.index}
                     tabIndex={0}
+                    title={tagIssues.length > 0 ? tagIssues.join("\n") : undefined}
                     onDoubleClick={() => beginEditingCell(virtualRow.index, "tags")}
                     onFocus={() => {
                       setActiveGridCell(virtualRow.index, "tags", isTagEditing ? "edit" : "select");
@@ -1128,6 +1163,10 @@ function RecordsGrid({
                     const isSelected = sameCell(activeCell, cell);
                     const isEditing = isSelected && activeCell?.mode === "edit";
                     const enumInfo = enumInfoForType(documents, field.type);
+                    const fieldIssues = cellIssues[fieldIndex];
+                    const structDefinition = structDefinitions[field.type];
+                    const placeholder = defaultPlaceholderForType(field.type, documents, structDefinitions);
+                    const displayValue = formatCellDisplayValue(field, row.data[field.name], documents, structDefinitions);
                     return (
                       <div
                         key={field.name}
@@ -1136,12 +1175,14 @@ function RecordsGrid({
                           "grid-cell-shell",
                           primaryFields.has(field.name) && "primary-col",
                           secondaryFields.has(field.name) && "secondary-col",
+                          fieldIssues.length > 0 && "invalid",
                           isSelected && "selected",
                           isEditing && "editing"
                         )}
                         data-grid-cell-field={fieldIndex}
                         data-grid-cell-row={virtualRow.index}
                         tabIndex={0}
+                        title={fieldIssues.length > 0 ? fieldIssues.join("\n") : undefined}
                         onDoubleClick={() => beginEditingCell(virtualRow.index, fieldIndex)}
                         onFocus={() => setActiveGridCell(virtualRow.index, fieldIndex, isEditing ? "edit" : "select")}
                         onKeyDown={(event) => handleSelectedCellKeyDown(event, virtualRow.index, fieldIndex)}
@@ -1156,10 +1197,16 @@ function RecordsGrid({
                               dataGridRow={virtualRow.index}
                               flags={enumInfo.flags}
                               options={enumInfo.members}
-                              placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
+                              placeholder={placeholder}
                               value={formatValue(row.data[field.name])}
-                              onChange={(value) => updateCell(document.relativePath, entry.originalIndex, field.name, value)}
+                              onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
+                              onChange={(value) =>
+                                updateCell(document.relativePath, entry.originalIndex, field.name, value, {
+                                  historyGroup: inputGroup(`cell-${entry.originalIndex}-${field.name}`)
+                                })
+                              }
                               onFocus={() => {
+                                beginInputGroup(`cell-${entry.originalIndex}-${field.name}`);
                                 setActiveGridCell(virtualRow.index, fieldIndex, "edit");
                               }}
                               onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
@@ -1169,15 +1216,19 @@ function RecordsGrid({
                               className="grid-cell-input"
                               data-grid-field={fieldIndex}
                               data-grid-row={virtualRow.index}
-                              placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
+                              placeholder={placeholder}
                               value={formatValue(row.data[field.name])}
+                              onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
                               onFocus={() => {
+                                beginInputGroup(`cell-${entry.originalIndex}-${field.name}`);
                                 setActiveGridCell(virtualRow.index, fieldIndex, "edit");
                               }}
                               onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
                               onPaste={(event) => handlePaste(event, entry.originalIndex, fieldIndex)}
                               onChange={(event) =>
-                                updateCell(document.relativePath, entry.originalIndex, field.name, coerceValue(field.type, event.target.value))
+                                updateCell(document.relativePath, entry.originalIndex, field.name, coerceValue(field.type, event.target.value), {
+                                  historyGroup: inputGroup(`cell-${entry.originalIndex}-${field.name}`)
+                                })
                               }
                             />
                           )
@@ -1191,9 +1242,9 @@ function RecordsGrid({
                             }}
                           >
                             {isEmptyCellValue(row.data[field.name]) ? (
-                              <span className="cell-placeholder">{defaultPlaceholderForType(field.type, documents, structDefinitions)}</span>
+                              <span className="cell-placeholder">{placeholder}</span>
                             ) : (
-                              <span>{formatValue(row.data[field.name])}</span>
+                              <span>{structDefinition ? displayValue : formatValue(row.data[field.name])}</span>
                             )}
                           </button>
                         )}
@@ -1206,12 +1257,13 @@ function RecordsGrid({
             })}
           </div>
           <div className="grid-add-row-footer" style={{ gridTemplateColumns }}>
-            <div className="row-head add-row-head">
-              <button className="icon-button" title="Add record" onClick={addRecord}>
+            <div className="row-head add-row-head" />
+            <div className="grid-add-row-fill">
+              <button className="secondary-button compact list-add-button" title="Add record" onClick={addRecord}>
                 <Plus size={14} />
+                Add
               </button>
             </div>
-            <div className="grid-add-row-fill" />
           </div>
           {structCell && popoverPosition && (
             <StructCellPopover
@@ -1290,7 +1342,6 @@ function RecordsCreateMenu({
 }) {
   return (
     <div className="context-menu" style={{ left: x, top: y }}>
-      <div className="context-menu-title">Create</div>
       <button onClick={onCreateField}>Field</button>
       <button onClick={onCreateRecord}>Record</button>
     </div>
@@ -1322,6 +1373,7 @@ function EnumCellInput({
   dataGridField,
   dataGridRow,
   flags,
+  onBlur,
   onChange,
   onFocus,
   onKeyDown,
@@ -1332,6 +1384,7 @@ function EnumCellInput({
   dataGridField: number;
   dataGridRow: number;
   flags: boolean;
+  onBlur: () => void;
   onChange: (value: string) => void;
   onFocus: () => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -1357,7 +1410,10 @@ function EnumCellInput({
         data-grid-row={dataGridRow}
         placeholder={placeholder}
         value={value}
-        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+        onBlur={() => {
+          onBlur();
+          window.setTimeout(() => setFocused(false), 120);
+        }}
         onChange={(event) => onChange(event.target.value)}
         onFocus={() => {
           setFocused(true);
@@ -1413,17 +1469,29 @@ function StructCellPopover({
   structDefinitions: Record<string, StructDefinition>;
 }) {
   const { documents, updateDocument } = useEditorStore();
+  const inputGroups = useRef<Record<string, string | undefined>>({});
+  const inputGroupSeq = useRef(0);
   if (!field || !row || !structDefinition) return null;
   const currentValue = objectValue(row.data[field.name]);
 
-  const updateStructField = (structField: FieldDefinition, value: MasterValue) => {
+  const beginInputGroup = (key: string) => {
+    inputGroups.current[key] = `${document.relativePath}:struct-cell:${rowIndex}:${field.name}:${key}:${inputGroupSeq.current++}`;
+  };
+
+  const endInputGroup = (key: string) => {
+    inputGroups.current[key] = undefined;
+  };
+
+  const inputGroup = (key: string) => inputGroups.current[key];
+
+  const updateStructField = (structField: FieldDefinition, value: MasterValue, historyGroup?: string) => {
     updateDocument(document.relativePath, `Edit ${field.name}.${structField.name}`, (draft) => {
       if (draft.definition.kind !== "table") return;
       const targetRow = draft.definition.rows[rowIndex];
       if (!targetRow) return;
       const current = objectValue(targetRow.data[field.name]);
       targetRow.data[field.name] = { ...current, [structField.name]: value };
-    });
+    }, { historyGroup });
   };
 
   return (
@@ -1449,7 +1517,9 @@ function StructCellPopover({
               <span>{structField.name}</span>
               <StructFieldInput
                 field={structField}
-                onChange={(nextValue) => updateStructField(structField, nextValue)}
+                onBlur={() => endInputGroup(structField.name)}
+                onChange={(nextValue) => updateStructField(structField, nextValue, inputGroup(structField.name))}
+                onFocus={() => beginInputGroup(structField.name)}
                 placeholder={placeholder}
                 structDefinitions={structDefinitions}
                 value={value}
@@ -1464,13 +1534,17 @@ function StructCellPopover({
 
 function StructFieldInput({
   field,
+  onBlur,
   onChange,
+  onFocus,
   placeholder,
   structDefinitions,
   value
 }: {
   field: FieldDefinition;
+  onBlur: () => void;
   onChange: (value: MasterValue) => void;
+  onFocus: () => void;
   placeholder: string;
   structDefinitions: Record<string, StructDefinition>;
   value: MasterValue;
@@ -1521,7 +1595,9 @@ function StructFieldInput({
     <input
       placeholder={placeholder}
       value={formatValue(value)}
+      onBlur={onBlur}
       onChange={(event) => onChange(coerceValue(field.type, event.target.value))}
+      onFocus={onFocus}
     />
   );
 }
@@ -1548,7 +1624,8 @@ function defaultEditorValue(
   if (type === "int" || type === "long" || type === "float" || type === "double") return 0;
   if (type.startsWith("list<")) return [];
   if (structDefinitions[type]) return {};
-  return enumMemberOptions(documents, type)[0] ?? "";
+  if (enumInfoForType(documents, type)) return "";
+  return "";
 }
 
 function cloneRowForFields(
@@ -1570,8 +1647,12 @@ function defaultPlaceholderForType(
   type: string,
   documents: Record<string, DefinitionDocument>,
   structDefinitions: Record<string, StructDefinition>
-) {
-  if (type === "string") return "string.Empty";
+): string {
+  if (type === "string") return "\"\"";
+  const enumInfo = enumInfoForType(documents, type);
+  if (enumInfo) return enumInfo.defaultMemberName ?? "0 (undefined)";
+  const structDefinition = structDefinitions[type];
+  if (structDefinition) return structDisplayPlaceholder(structDefinition, documents, structDefinitions);
   const value = defaultEditorValue(type, documents, structDefinitions);
   if (Array.isArray(value)) return "[]";
   if (value && typeof value === "object") return "{}";
@@ -1590,14 +1671,123 @@ function enumMemberOptions(documents: Record<string, DefinitionDocument>, typeNa
   return enumInfoForType(documents, typeName)?.members ?? [];
 }
 
-function enumInfoForType(documents: Record<string, DefinitionDocument>, typeName: string) {
+function formatCellDisplayValue(
+  field: FieldDefinition,
+  value: MasterValue | undefined,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  const structDefinition = structDefinitions[field.type];
+  if (structDefinition) return formatStructCellValue(value, structDefinition, documents, structDefinitions);
+  return formatValue(value);
+}
+
+function formatStructCellValue(
+  value: MasterValue | undefined,
+  structDefinition: StructDefinition,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  const map = objectValue(value);
+  return structDefinition.fields
+    .map((field) => {
+      const fieldValue = map[field.name];
+      if (isEmptyCellValue(fieldValue)) return defaultPlaceholderForType(field.type, documents, structDefinitions);
+      return formatCellDisplayValue(field, fieldValue, documents, structDefinitions);
+    })
+    .join(", ");
+}
+
+function structDisplayPlaceholder(
+  structDefinition: StructDefinition,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  return structDefinition.fields
+    .map((field) => defaultPlaceholderForType(field.type, documents, structDefinitions))
+    .join(", ");
+}
+
+function rowTagIssues(tags: string[], allowedTags: string[]) {
+  const issues: string[] = [];
+  const seen = new Set<string>();
+  for (const rawTag of tags) {
+    const tag = rawTag.trim();
+    if (!tag) {
+      issues.push("Row tag is empty.");
+      continue;
+    }
+    if (!isValidTagName(tag)) {
+      issues.push(`Invalid or reserved row tag: ${rawTag}`);
+    }
+    if (seen.has(tag)) {
+      issues.push(`Duplicate row tag: ${tag}`);
+    }
+    seen.add(tag);
+    if (allowedTags.length > 0 && isValidTagName(tag) && !allowedTags.includes(tag)) {
+      issues.push(`Undeclared row tag: ${tag}`);
+    }
+  }
+  return issues;
+}
+
+function cellIssuesForField(
+  field: FieldDefinition,
+  value: MasterValue | undefined,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>,
+  label = field.name
+): string[] {
+  const enumInfo = enumInfoForType(documents, field.type);
+  if (enumInfo) return enumCellIssues(label, value, enumInfo);
+  const structDefinition = structDefinitions[field.type];
+  if (!structDefinition) return [];
+  if (!isEmptyCellValue(value) && (typeof value !== "object" || Array.isArray(value))) {
+    return [`${label}: struct value must be an object.`];
+  }
+  const map = objectValue(value);
+  return structDefinition.fields.flatMap((structField) =>
+    cellIssuesForField(structField, map[structField.name], documents, structDefinitions, `${label}.${structField.name}`)
+  );
+}
+
+function enumCellIssues(fieldName: string, value: MasterValue | undefined, enumInfo: EnumInfo): string[] {
+  if (value == null || value === "") {
+    return enumInfo.hasZeroDefault ? [] : [`${fieldName}: enum default value 0 is not explicitly defined.`];
+  }
+  if (typeof value !== "string") return [`${fieldName}: enum value must be a string.`];
+  const raw = value.trim();
+  if (!raw) return enumInfo.hasZeroDefault ? [] : [`${fieldName}: enum default value 0 is not explicitly defined.`];
+  const parts = raw.split(",").map((part) => part.trim());
+  if (!enumInfo.flags && parts.length > 1) {
+    return [`${fieldName}: composite enum value requires a Flags enum.`];
+  }
+  const unknown = parts.filter((part) => !part || !enumInfo.members.includes(part));
+  if (unknown.length > 0) {
+    return [`${fieldName}: unknown enum member ${unknown.map((part) => `\`${part || "(empty)"}\``).join(", ")}.`];
+  }
+  return [];
+}
+
+function enumInfoForType(documents: Record<string, DefinitionDocument>, typeName: string): EnumInfo | undefined {
   const document = Object.values(documents).find(
     (item) => item.definition.kind === "enum" && item.typeName === typeName
   );
   if (!document || document.definition.kind !== "enum") return undefined;
+  const explicitZeroMember = document.definition.members.find(
+    (member) => typeof member !== "string" && member.value === 0
+  );
+  const zeroIsVirtual = Boolean(document.definition.flags) && !explicitZeroMember;
+  const rawMembers = document.definition.members.map((member) => (typeof member === "string" ? member : member.name));
+  const members = zeroIsVirtual && !rawMembers.includes("None") ? ["None", ...rawMembers] : rawMembers;
+  const defaultMemberName = typeof explicitZeroMember === "string"
+    ? undefined
+    : explicitZeroMember?.name ?? (zeroIsVirtual ? "None" : undefined);
   return {
     flags: Boolean(document.definition.flags),
-    members: document.definition.members.map((member) => (typeof member === "string" ? member : member.name))
+    members,
+    hasZeroDefault: Boolean(defaultMemberName),
+    defaultMemberName
   };
 }
 

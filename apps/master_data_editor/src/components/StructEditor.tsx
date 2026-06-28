@@ -15,6 +15,8 @@ export function StructEditor({ document }: { document: DefinitionDocument }) {
   const { documents, updateDocument } = useEditorStore();
   const [focusFieldIndex, setFocusFieldIndex] = useState<number>();
   const fieldInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const inputGroups = useRef<Record<string, string | undefined>>({});
+  const inputGroupSeq = useRef(0);
   const fieldCount = document.definition.kind === "struct" ? document.definition.fields.length : 0;
   const duplicateKeyIndexes = useMemo(
     () => (document.definition.kind === "struct" ? duplicateMessagePackKeys(document.definition.fields) : new Set<number>()),
@@ -55,23 +57,35 @@ export function StructEditor({ document }: { document: DefinitionDocument }) {
     });
   };
 
+  const beginInputGroup = (key: string) => {
+    inputGroups.current[key] = `${document.relativePath}:struct:${key}:${inputGroupSeq.current++}`;
+  };
+
+  const endInputGroup = (key: string) => {
+    inputGroups.current[key] = undefined;
+  };
+
+  const inputGroup = (key: string) => inputGroups.current[key];
+
   return (
     <div className="simple-editor struct-editor">
       <EditorHeader document={document} />
       <div className="simple-list">
         {struct.fields.map((field, index) => (
-          <div className="simple-row struct-row" key={`${field.name}-${index}`}>
+          <div className="simple-row struct-row" key={`struct-field-${index}`}>
             <input
               ref={(element) => {
                 fieldInputRefs.current[index] = element;
               }}
               value={field.name}
+              onBlur={() => endInputGroup(`field-name-${index}`)}
               onChange={(event) =>
                 updateDocument(document.relativePath, "Edit struct field", (draft) => {
                   if (draft.definition.kind !== "struct") return;
                   draft.definition.fields[index].name = event.target.value;
-                })
+                }, { historyGroup: inputGroup(`field-name-${index}`) })
               }
+              onFocus={() => beginInputGroup(`field-name-${index}`)}
             />
             <select
               value={field.type}
@@ -93,7 +107,7 @@ export function StructEditor({ document }: { document: DefinitionDocument }) {
               ))}
             </select>
             <button
-              className={clsx("key-button", duplicateKeyIndexes.has(messagePackKey(field, index)) && "duplicate")}
+              className={clsx("key-edit-badge", "badge", "key", duplicateKeyIndexes.has(messagePackKey(field, index)) && "duplicate")}
               onClick={() => editMessagePackKey(index)}
               title="Edit MessagePack Key"
             >
@@ -114,8 +128,9 @@ export function StructEditor({ document }: { document: DefinitionDocument }) {
           </div>
         ))}
         <div className="simple-add-row">
-          <button className="icon-button" title="Add field" onClick={addField}>
+          <button className="secondary-button compact list-add-button" title="Add field" onClick={addField}>
             <Plus size={15} />
+            Add
           </button>
         </div>
       </div>

@@ -309,20 +309,22 @@ function CreateMenu({
       onMouseDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="tree-menu-title">Create</div>
-      <button className="tree-menu-child" type="button" onClick={onCreateFolder}>
+      <div className="tree-menu-title">New Folder</div>
+      <button type="button" onClick={onCreateFolder}>
         <FolderPlus size={14} />
         Folder
       </button>
-      <button className="tree-menu-child" type="button" onClick={() => onCreateFile("table")}>
+      <hr />
+      <div className="tree-menu-title">New File</div>
+      <button type="button" onClick={() => onCreateFile("table")}>
         <Table2 size={14} />
         Table
       </button>
-      <button className="tree-menu-child" type="button" onClick={() => onCreateFile("enum")}>
+      <button type="button" onClick={() => onCreateFile("enum")}>
         <ListFilter size={14} />
         Enum
       </button>
-      <button className="tree-menu-child" type="button" onClick={() => onCreateFile("struct")}>
+      <button type="button" onClick={() => onCreateFile("struct")}>
         <Braces size={14} />
         Struct
       </button>

@@ -197,6 +197,9 @@ fn generate_enum_body(value: &EnumDefinition) -> String {
             value.name, value.underlying_type
         ));
     }
+    if value.flags && !enum_has_explicit_zero(value) {
+        output.push_str("    None = 0,\n");
+    }
     for member in &value.members {
         match member {
             EnumMember::Name(name) => output.push_str(&format!("    {},\n", name)),
@@ -207,6 +210,13 @@ fn generate_enum_body(value: &EnumDefinition) -> String {
     }
     output.push_str("}\n");
     output
+}
+
+fn enum_has_explicit_zero(value: &EnumDefinition) -> bool {
+    value
+        .members
+        .iter()
+        .any(|member| matches!(member, EnumMember::WithValue { value: 0, .. }))
 }
 
 fn generate_struct_body(
@@ -638,5 +648,23 @@ mod tests {
 
         assert!(body.contains("[System.Flags]"));
         assert!(body.contains("public enum Permission"));
+    }
+
+    #[test]
+    fn flags_enum_without_zero_emits_auto_none() {
+        let value = EnumDefinition {
+            name: "Permission".to_string(),
+            underlying_type: "int".to_string(),
+            flags: true,
+            members: vec![EnumMember::WithValue {
+                name: "Read".to_string(),
+                value: 1,
+            }],
+        };
+
+        let body = generate_enum_body(&value);
+
+        assert!(body.contains("None = 0"));
+        assert!(body.contains("Read = 1"));
     }
 }

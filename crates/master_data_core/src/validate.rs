@@ -26,6 +26,7 @@ pub enum ResolvedType {
 struct EnumValueInfo {
     members: IndexSet<String>,
     flags: bool,
+    has_zero_default: bool,
 }
 
 impl ResolvedType {
@@ -239,6 +240,7 @@ fn validate_enum(
 
     let mut names = IndexSet::new();
     let mut values = IndexSet::new();
+    let mut has_explicit_zero = false;
     for member in &value.members {
         if !identifier.is_match(member.name()) {
             bag.push(
@@ -259,6 +261,9 @@ fn validate_enum(
             );
         }
         if let EnumMember::WithValue { value, .. } = member {
+            if *value == 0 {
+                has_explicit_zero = true;
+            }
             if !values.insert(*value) {
                 bag.push(
                     Diagnostic::error("LMD0208", format!("duplicate enum value `{value}`"))
@@ -266,6 +271,15 @@ fn validate_enum(
                 );
             }
         }
+    }
+    if value.flags && !has_explicit_zero && names.contains("None") {
+        bag.push(
+            Diagnostic::error(
+                "LMD0209",
+                "flags enum without explicit value 0 reserves member name `None`",
+            )
+            .at(&source.source.path),
+        );
     }
 }
 
@@ -1042,23 +1056,34 @@ fn enum_member_map(definitions: &[SourceDefinition]) -> IndexMap<String, EnumVal
     definitions
         .iter()
         .filter_map(|item| match &item.definition {
-            Definition::Enum(value) => Some((
-                value.name.clone(),
-                EnumValueInfo {
-                    members: value
-                        .members
-                        .iter()
-                        .map(|member| member.name().to_string())
-                        .collect(),
-                    flags: value.flags,
-                },
-            )),
+            Definition::Enum(value) => {
+                let has_explicit_zero = enum_has_explicit_zero(value);
+                let mut members: IndexSet<String> = value
+                    .members
+                    .iter()
+                    .map(|member| member.name().to_string())
+                    .collect();
+                if value.flags && !has_explicit_zero {
+                    members.insert("None".to_string());
+                }
+                Some((
+                    value.name.clone(),
+                    EnumValueInfo {
+                        members,
+                        flags: value.flags,
+                        has_zero_default: has_explicit_zero || value.flags,
+                    },
+                ))
+            }
             _ => None,
         })
         .collect()
 }
 
 fn enum_value_is_known(raw_name: &str, info: &EnumValueInfo) -> bool {
+    if raw_name.is_empty() {
+        return info.has_zero_default;
+    }
     if info.members.contains(raw_name) {
         return true;
     }
@@ -1071,6 +1096,13 @@ fn enum_value_is_known(raw_name: &str, info: &EnumValueInfo) -> bool {
         .filter(|part| !part.is_empty())
         .collect();
     !parts.is_empty() && parts.iter().all(|part| info.members.contains(*part))
+}
+
+fn enum_has_explicit_zero(value: &EnumDefinition) -> bool {
+    value
+        .members
+        .iter()
+        .any(|member| matches!(member, EnumMember::WithValue { value: 0, .. }))
 }
 
 fn struct_field_map(definitions: &[SourceDefinition]) -> IndexMap<String, Vec<FieldDefinition>> {
@@ -1335,6 +1367,44 @@ rows:
   - data:
       Id: 1
       Permission: "Read, Write"
+"#,
+            ]),
+            None,
+            &[],
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn flags_enum_without_zero_accepts_auto_none_and_empty_default() {
+        let result = validate(
+            parse_all(&[
+                r#"kind: enum
+name: Permission
+flags: true
+members:
+  - { name: Read, value: 1 }
+  - { name: Write, value: 2 }
+"#,
+                r#"kind: table
+table: items
+typeName: ItemMaster
+keys:
+  primary:
+    fields: [Id]
+fields:
+  - name: Id
+    type: int
+  - name: Permission
+    type: Permission
+rows:
+  - data:
+      Id: 1
+      Permission: ""
+  - data:
+      Id: 2
+      Permission: None
 "#,
             ]),
             None,

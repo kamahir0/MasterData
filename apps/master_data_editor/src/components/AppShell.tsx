@@ -2,6 +2,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Database,
+  FolderPlus,
   FolderOpen,
   History,
   Hammer,
@@ -41,6 +42,7 @@ export function AppShell() {
     bottomPanelVisible,
     build,
     clean,
+    createProject,
     dirty,
     error,
     generate,
@@ -86,6 +88,23 @@ export function AppShell() {
     }
   }, [openProject]);
 
+  const chooseNewProjectDirectory = useCallback(async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Create Lilja.MasterData Project"
+      });
+      if (typeof selected === "string") {
+        await createProject(selected);
+        return;
+      }
+    } catch {
+      const path = window.prompt("New project directory");
+      if (path) await createProject(path);
+    }
+  }, [createProject]);
+
   const requestApplicationExit = useCallback(async () => {
     allowCloseRef.current = true;
     if ("__TAURI_INTERNALS__" in window) {
@@ -119,14 +138,23 @@ export function AppShell() {
 
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
-    let unlisten: (() => void) | undefined;
+    let unlistenOpen: (() => void) | undefined;
+    let unlistenNew: (() => void) | undefined;
+    void listen("menu-new-project", () => {
+      void chooseNewProjectDirectory();
+    }).then((dispose) => {
+      unlistenNew = dispose;
+    });
     void listen("menu-open-project", () => {
       void chooseProjectSettingsFile();
     }).then((dispose) => {
-      unlisten = dispose;
+      unlistenOpen = dispose;
     });
-    return () => unlisten?.();
-  }, [chooseProjectSettingsFile]);
+    return () => {
+      unlistenOpen?.();
+      unlistenNew?.();
+    };
+  }, [chooseNewProjectDirectory, chooseProjectSettingsFile]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -173,11 +201,13 @@ export function AppShell() {
       const command = event.metaKey || event.ctrlKey;
       if (!command) return;
       if (event.key.toLowerCase() === "z") {
+        if (isEditableElement(event.target)) return;
         event.preventDefault();
         if (event.shiftKey) void redo();
         else void undo();
       }
       if (event.key.toLowerCase() === "y") {
+        if (isEditableElement(event.target)) return;
         event.preventDefault();
         void redo();
       }
@@ -273,6 +303,7 @@ export function AppShell() {
           ) : (
             <WelcomePage
               isBusy={isBusy}
+              onNewProject={chooseNewProjectDirectory}
               onOpenProject={chooseProjectSettingsFile}
               onOpenRecent={(path) => void openProject(path)}
               recentProjects={recentProjects}
@@ -283,6 +314,10 @@ export function AppShell() {
       {bottomPanelVisible ? <BottomPanel /> : <StatusStrip />}
     </div>
   );
+}
+
+function isEditableElement(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
 export function IconButton({
@@ -305,11 +340,13 @@ export function IconButton({
 
 function WelcomePage({
   isBusy,
+  onNewProject,
   onOpenProject,
   onOpenRecent,
   recentProjects
 }: {
   isBusy: boolean;
+  onNewProject: () => Promise<void>;
   onOpenProject: () => Promise<void>;
   onOpenRecent: (path: string) => void;
   recentProjects: string[];
@@ -320,10 +357,16 @@ function WelcomePage({
         <Database size={38} />
         <h1>Lilja.MasterData Editor</h1>
         <p>Open the project root containing project-settings.yaml.</p>
-        <button className="primary-action" onClick={() => void onOpenProject()} disabled={isBusy}>
-          <FolderOpen size={16} />
-          Open Project...
-        </button>
+        <div className="welcome-actions">
+          <button className="primary-action" onClick={() => void onNewProject()} disabled={isBusy}>
+            <FolderPlus size={16} />
+            New Project...
+          </button>
+          <button onClick={() => void onOpenProject()} disabled={isBusy}>
+            <FolderOpen size={16} />
+            Open Project...
+          </button>
+        </div>
       </div>
       <div className="recent-projects">
         <div className="section-heading">

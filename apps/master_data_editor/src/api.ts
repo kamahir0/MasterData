@@ -13,6 +13,9 @@ export const api = {
   openProject(path: string) {
     return invoke<ProjectSnapshot>("open_project", { path });
   },
+  createProject(projectRoot: string) {
+    return invoke<ProjectSnapshot>("create_editor_project", { projectRoot });
+  },
   reloadProject(projectRoot: string) {
     return invoke<ProjectSnapshot>("reload_project", { projectRoot });
   },

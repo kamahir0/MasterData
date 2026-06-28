@@ -71,7 +71,10 @@ public static class MasterMemoryBinaryBuilder
 
         if (targetType.IsEnum)
         {
-            return Enum.Parse(targetType, raw.GetValue<string>(), ignoreCase: false);
+            var value = raw.GetValue<string>();
+            return string.IsNullOrEmpty(value)
+                ? Activator.CreateInstance(targetType)
+                : Enum.Parse(targetType, value, ignoreCase: false);
         }
 
         if (IsImmutableArray(targetType))

@@ -20,6 +20,11 @@ interface HistoryEntry {
   label: string;
   patches: Patch[];
   inversePatches: Patch[];
+  group?: string;
+}
+
+interface DocumentUpdateOptions {
+  historyGroup?: string;
 }
 
 type FileHistoryEntry =
@@ -68,6 +73,7 @@ interface EditorState {
   error?: string;
   loadPreferences: () => Promise<void>;
   openProject: (path: string) => Promise<void>;
+  createProject: (path: string) => Promise<void>;
   reloadProject: (activePath?: string) => Promise<void>;
   setActivePath: (path: string) => void;
   setActiveView: (view: ActiveView) => void;
@@ -76,7 +82,8 @@ interface EditorState {
   updateDocument: (
     path: string,
     label: string,
-    recipe: (document: DefinitionDocument) => void
+    recipe: (document: DefinitionDocument) => void,
+    options?: DocumentUpdateOptions
   ) => void;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
@@ -104,7 +111,7 @@ interface EditorState {
   setBottomPanelHeight: (height: number) => void;
   setBottomPanelActiveTab: (tab: BottomPanelTab) => void;
   openDiagnostic: (diagnostic: EditorDiagnostic) => void;
-  updateCell: (path: string, rowIndex: number, fieldName: string, value: MasterValue) => void;
+  updateCell: (path: string, rowIndex: number, fieldName: string, value: MasterValue, options?: DocumentUpdateOptions) => void;
   addRow: (path: string) => void;
   deleteRow: (path: string, rowIndex: number) => void;
 }
@@ -183,6 +190,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({ isBusy: false });
     }
   },
+  async createProject(path) {
+    set({ isBusy: true, error: undefined });
+    try {
+      const project = await api.createProject(path);
+      const documents = Object.fromEntries(project.documents.map((doc) => [doc.relativePath, doc]));
+      const recentProjects = mergeRecentProjects(project.root, get().recentProjects);
+      set({
+        project,
+        projectSettingsDraft: cloneConfig(project.config),
+        projectSettingsDirty: false,
+        documents,
+        diagnostics: project.diagnostics,
+        activeView: "projectSettings",
+        activePath: project.documents[0]?.relativePath,
+        dirty: {},
+        undoStacks: {},
+        redoStacks: {},
+        projectPathInput: project.root,
+        recentProjects,
+        buildLog: [`Created ${project.root}`]
+      });
+      void persistPreferences();
+    } catch (error) {
+      set({ error: String(error) });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
   async reloadProject(activePath) {
     const project = get().project;
     if (!project) return;
@@ -248,7 +283,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({ isBusy: false });
     }
   },
-  updateDocument(path, label, recipe) {
+  updateDocument(path, label, recipe, options) {
     const current = get().documents[path];
     if (!current) return;
     const [next, patches, inversePatches] = produceWithPatches(current, recipe);
@@ -258,7 +293,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       dirty: { ...state.dirty, [path]: true },
       undoStacks: {
         ...state.undoStacks,
-        [path]: [...(state.undoStacks[path] ?? []), { label, patches, inversePatches }]
+        [path]: appendHistoryEntry(state.undoStacks[path] ?? [], {
+          label,
+          patches,
+          inversePatches,
+          group: options?.historyGroup
+        })
       },
       redoStacks: { ...state.redoStacks, [path]: [] }
     }));
@@ -529,11 +569,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
     void persistPreferences();
   },
-  updateCell(path, rowIndex, fieldName, value) {
+  updateCell(path, rowIndex, fieldName, value, options) {
     get().updateDocument(path, `Edit ${fieldName}`, (document) => {
       if (document.definition.kind !== "table") return;
       document.definition.rows[rowIndex].data[fieldName] = value;
-    });
+    }, options);
   },
   addRow(path) {
     get().updateDocument(path, "Add Record", (document) => {
@@ -574,6 +614,22 @@ async function runCommand(label: string, command: () => Promise<CommandResult>) 
     useEditorStore.setState({ isBusy: false });
     void persistPreferences();
   }
+}
+
+function appendHistoryEntry(stack: HistoryEntry[], entry: HistoryEntry) {
+  const last = stack.at(-1);
+  if (!entry.group || !last || last.group !== entry.group) {
+    return [...stack, entry];
+  }
+  return [
+    ...stack.slice(0, -1),
+    {
+      label: entry.label,
+      group: entry.group,
+      patches: [...last.patches, ...entry.patches],
+      inversePatches: [...entry.inversePatches, ...last.inversePatches]
+    }
+  ];
 }
 
 async function persistPreferences() {

@@ -2,24 +2,26 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use indexmap::IndexMap;
 use master_data_core::{
-    build_project, clean_project, generate_project, scan_yaml_files, sync_project,
-    validate_project, Definition, DiagnosticBag, MasterDataConfig, SourceDefinition,
-    CONFIG_FILE_NAME,
+    build_project, clean_project, default_project_config, generate_project, init_project,
+    scan_yaml_files, sync_project, validate_project, Definition, DiagnosticBag, InitProjectOptions,
+    MasterDataConfig, SourceDefinition, CONFIG_FILE_NAME, TOOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use tauri::menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Emitter, LogicalPosition, Window};
 
 const MENU_OPEN_PROJECT: &str = "file_open_project";
+const MENU_NEW_PROJECT: &str = "file_new_project";
 const MENU_MASTER_CREATE_PREFIX: &str = "master_create:";
 const MENU_MASTER_ENTRY_PREFIX: &str = "master_entry:";
 const MENU_TABLE_CREATE_PREFIX: &str = "table_create:";
 const MENU_TABLE_COLUMN_PREFIX: &str = "table_column:";
 const MENU_TABLE_RECORD_PREFIX: &str = "table_record:";
 const EVENT_OPEN_PROJECT: &str = "menu-open-project";
+const EVENT_NEW_PROJECT: &str = "menu-new-project";
 const EVENT_MASTER_CREATE_ENTRY: &str = "master-create-entry";
 const EVENT_MASTER_ENTRY_ACTION: &str = "master-entry-action";
 const EVENT_TABLE_CREATE_ENTRY: &str = "table-create-entry";
@@ -180,11 +182,27 @@ fn popup_master_create_menu(
     x: f64,
     y: f64,
 ) -> Result<(), String> {
+    let new_folder = MenuItem::with_id(
+        &window,
+        format!("master_create_new_folder:{directory}"),
+        "New Folder",
+        false,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
     let folder = MenuItem::with_id(
         &window,
         format!("{MENU_MASTER_CREATE_PREFIX}folder:{directory}"),
         "Folder",
         true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let new_file = MenuItem::with_id(
+        &window,
+        format!("master_create_new_file:{directory}"),
+        "New File",
+        false,
         None::<&str>,
     )
     .map_err(to_string)?;
@@ -212,14 +230,20 @@ fn popup_master_create_menu(
         None::<&str>,
     )
     .map_err(to_string)?;
-    let create = Submenu::with_items(
+    let separator = PredefinedMenuItem::separator(&window).map_err(to_string)?;
+    let menu = Menu::with_items(
         &window,
-        "Create",
-        true,
-        &[&folder, &table, &enum_file, &struct_file],
+        &[
+            &new_folder,
+            &folder,
+            &separator,
+            &new_file,
+            &table,
+            &enum_file,
+            &struct_file,
+        ],
     )
     .map_err(to_string)?;
-    let menu = Menu::with_items(&window, &[&create]).map_err(to_string)?;
     menu.popup_at(window, LogicalPosition::new(x, y))
         .map_err(to_string)
 }
@@ -249,11 +273,27 @@ fn popup_master_entry_menu(
     )
     .map_err(to_string)?;
     if kind == "directory" {
+        let new_folder = MenuItem::with_id(
+            &window,
+            format!("master_create_new_folder:{path}"),
+            "New Folder",
+            false,
+            None::<&str>,
+        )
+        .map_err(to_string)?;
         let folder = MenuItem::with_id(
             &window,
             format!("{MENU_MASTER_CREATE_PREFIX}folder:{path}"),
             "Folder",
             true,
+            None::<&str>,
+        )
+        .map_err(to_string)?;
+        let new_file = MenuItem::with_id(
+            &window,
+            format!("master_create_new_file:{path}"),
+            "New File",
+            false,
             None::<&str>,
         )
         .map_err(to_string)?;
@@ -281,16 +321,24 @@ fn popup_master_entry_menu(
             None::<&str>,
         )
         .map_err(to_string)?;
-        let create = Submenu::with_items(
+        let separator1 = PredefinedMenuItem::separator(&window).map_err(to_string)?;
+        let separator2 = PredefinedMenuItem::separator(&window).map_err(to_string)?;
+        let menu = Menu::with_items(
             &window,
-            "Create",
-            true,
-            &[&folder, &table, &enum_file, &struct_file],
+            &[
+                &new_folder,
+                &folder,
+                &separator1,
+                &new_file,
+                &table,
+                &enum_file,
+                &struct_file,
+                &separator2,
+                &rename,
+                &delete,
+            ],
         )
         .map_err(to_string)?;
-        let separator = PredefinedMenuItem::separator(&window).map_err(to_string)?;
-        let menu = Menu::with_items(&window, &[&create, &separator, &rename, &delete])
-            .map_err(to_string)?;
         return menu
             .popup_at(window, LogicalPosition::new(x, y))
             .map_err(to_string);
@@ -319,9 +367,7 @@ fn popup_table_create_menu(window: Window, x: f64, y: f64) -> Result<(), String>
         None::<&str>,
     )
     .map_err(to_string)?;
-    let create =
-        Submenu::with_items(&window, "Create", true, &[&field, &record]).map_err(to_string)?;
-    let menu = Menu::with_items(&window, &[&create]).map_err(to_string)?;
+    let menu = Menu::with_items(&window, &[&field, &record]).map_err(to_string)?;
     menu.popup_at(window, LogicalPosition::new(x, y))
         .map_err(to_string)
 }
@@ -463,6 +509,21 @@ fn popup_table_record_menu(
 fn open_project(path: String) -> Result<ProjectSnapshot, String> {
     load_project_snapshot(resolve_project_root(PathBuf::from(path)).map_err(to_string)?)
         .map_err(to_string)
+}
+
+#[tauri::command]
+fn create_editor_project(project_root: String) -> Result<ProjectSnapshot, String> {
+    let root = resolve_new_project_root(PathBuf::from(project_root)).map_err(to_string)?;
+    init_project(
+        &root,
+        &InitProjectOptions {
+            config: default_project_config(TOOL_VERSION),
+            force: false,
+            create_converter_dir: true,
+        },
+    )
+    .map_err(to_string)?;
+    load_project_snapshot(root).map_err(to_string)
 }
 
 #[tauri::command]
@@ -676,6 +737,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .menu(|app| {
             let menu = Menu::default(app)?;
+            let new_project = MenuItem::with_id(
+                app,
+                MENU_NEW_PROJECT,
+                "New Project...",
+                true,
+                Some("CmdOrCtrl+N"),
+            )?;
             let open_project = MenuItem::with_id(
                 app,
                 MENU_OPEN_PROJECT,
@@ -689,13 +757,17 @@ pub fn run() {
                     continue;
                 };
                 if submenu.text()? == "File" {
-                    submenu.prepend_items(&[&open_project, &separator])?;
+                    submenu.prepend_items(&[&new_project, &open_project, &separator])?;
                     break;
                 }
             }
             Ok(menu)
         })
         .on_menu_event(|app, event| {
+            if event.id() == MENU_NEW_PROJECT {
+                let _ = app.emit(EVENT_NEW_PROJECT, ());
+                return;
+            }
             if event.id() == MENU_OPEN_PROJECT {
                 let _ = app.emit(EVENT_OPEN_PROJECT, ());
                 return;
@@ -777,6 +849,7 @@ pub fn run() {
             popup_table_create_menu,
             popup_table_column_menu,
             popup_table_record_menu,
+            create_editor_project,
             open_project,
             reload_project,
             validate_editor_project,
@@ -981,6 +1054,26 @@ fn resolve_project_root(start: PathBuf) -> Result<PathBuf> {
             anyhow::bail!("{CONFIG_FILE_NAME} was not found");
         }
     }
+}
+
+fn resolve_new_project_root(path: PathBuf) -> Result<PathBuf> {
+    if path.exists() {
+        let root = canonicalize_existing(path)?;
+        if root.join(CONFIG_FILE_NAME).exists() {
+            anyhow::bail!("{} already exists", root.join(CONFIG_FILE_NAME).display());
+        }
+        return Ok(root);
+    }
+
+    let parent = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let parent = canonicalize_existing(parent)?;
+    let file_name = path
+        .file_name()
+        .with_context(|| format!("invalid project path: {}", path.display()))?;
+    Ok(parent.join(file_name))
 }
 
 fn resolve_master_file(project_root: &str, relative_path: &str) -> Result<PathBuf> {

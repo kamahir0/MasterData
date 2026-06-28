@@ -354,6 +354,13 @@ select {
   background: transparent;
 }
 
+.tree-create-menu hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid #dce4ec;
+  margin: 4px 0;
+}
+
 .tree-menu-title {
   height: 24px;
   display: flex;
@@ -362,10 +369,6 @@ select {
   color: #536272;
   font-size: 12px;
   font-weight: 700;
-}
-
-.tree-menu-child {
-  padding-left: 18px;
 }
 
 .tree-list {
@@ -530,6 +533,13 @@ select {
   color: #607080;
 }
 
+.welcome-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .primary-action {
   height: 34px;
   background: #246fa8;
@@ -658,6 +668,11 @@ select {
   z-index: 70;
   border-color: #2f7fbd;
   box-shadow: 0 0 0 2px rgba(47, 127, 189, 0.16);
+}
+
+.tag-token-input.invalid {
+  border-color: #d96552;
+  background: #fff7f5;
 }
 
 .tag-token-scroll {
@@ -853,6 +868,8 @@ select {
 .key-edit-badge {
   height: auto;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 2px 5px;
 }
 
@@ -1177,15 +1194,6 @@ select {
   border-radius: 4px;
 }
 
-.context-menu-title {
-  height: 24px;
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  color: #536272;
-  font-size: 12px;
-}
-
 .context-menu hr {
   width: 100%;
   border: 0;
@@ -1269,6 +1277,11 @@ select {
 .grid-cell-shell.editing {
   outline: 2px solid #2f7fbd;
   outline-offset: -2px;
+}
+
+.grid-cell-shell.invalid {
+  box-shadow: inset 0 0 0 2px #d96552;
+  background: #fff7f5;
 }
 
 .grid-cell-input {
@@ -1448,20 +1461,15 @@ select {
   justify-content: center;
 }
 
-.grid-add-row-footer .add-row-head button {
-  opacity: 1;
-  pointer-events: auto;
-  border: 1px solid #cbd6e0;
-  border-radius: 4px;
-  background: #ffffff;
-  color: #2f5f87;
-}
-
 .grid-add-row-fill {
   grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
   border-right: 1px solid #e2e7ed;
   border-bottom: 1px solid #e9eef3;
   background: #fbfcfe;
+  padding: 0 8px;
 }
 
 .row-error {
@@ -1524,6 +1532,31 @@ select {
   border-bottom: 1px solid #e0e6ec;
 }
 
+.settings-problems {
+  max-width: 980px;
+  display: grid;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #e2a69b;
+  border-radius: 6px;
+  background: #fff7f5;
+  color: #a52e20;
+}
+
+.settings-problems-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+}
+
+.settings-problems ul,
+.profile-row-errors {
+  margin: 0;
+  padding-left: 20px;
+}
+
 .settings-section h3 {
   margin: 0 0 10px;
   font-size: 15px;
@@ -1555,6 +1588,10 @@ select {
   min-width: 0;
 }
 
+.settings-field-tall {
+  grid-template-rows: auto auto;
+}
+
 .settings-field > span {
   font-size: 12px;
   font-weight: 700;
@@ -1564,6 +1601,11 @@ select {
 .settings-field input:not([type="checkbox"]),
 .settings-field select {
   width: 100%;
+}
+
+.settings-field input.invalid {
+  border-color: #d96552;
+  background: #fff7f5;
 }
 
 .settings-field .tag-token-input {
@@ -1593,11 +1635,54 @@ select {
   gap: 6px;
 }
 
+.list-add-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  justify-self: start;
+  width: 100%;
+  min-height: 30px;
+}
+
+.list-add-button {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  min-width: 72px;
+}
+
+.profile-row-block {
+  display: grid;
+  gap: 4px;
+}
+
 .profile-row {
   display: grid;
   grid-template-columns: minmax(120px, 180px) minmax(160px, 1fr) minmax(160px, 1fr) 30px;
   gap: 8px;
   align-items: center;
+}
+
+.profile-row-errors {
+  color: #a52e20;
+  font-size: 12px;
+}
+
+.allowed-tags-editor {
+  display: grid;
+  gap: 6px;
+  align-items: start;
+}
+
+.allowed-tag-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 320px) 30px;
+  gap: 6px;
+  align-items: center;
+}
+
+.allowed-tag-add {
+  width: max-content;
+  margin-left: 0;
 }
 
 .recent-list {
@@ -1643,12 +1728,14 @@ select {
 }
 
 .simple-add-row {
+  display: flex;
+  justify-content: flex-start;
+  justify-self: start;
+  width: 100%;
   padding: 4px 16px;
 }
 
-.simple-add-row .icon-button {
-  width: 30px;
-  height: 30px;
+.simple-add-row .list-add-button {
   background: #f8fafc;
 }
 
@@ -1830,7 +1917,7 @@ select {
 :root[data-theme="dark"] .table-settings,
 :root[data-theme="dark"] .table-settings-toggle,
 :root[data-theme="dark"] .enum-options,
-:root[data-theme="dark"] .simple-add-row .icon-button,
+:root[data-theme="dark"] .simple-add-row .list-add-button,
 :root[data-theme="dark"] .row-head,
 :root[data-theme="dark"] .grid-header,
 :root[data-theme="dark"] .grid-add-field-head,
@@ -1866,7 +1953,6 @@ select {
 :root[data-theme="dark"] .empty-state,
 :root[data-theme="dark"] .zoom-label,
 :root[data-theme="dark"] .tree-menu-title,
-:root[data-theme="dark"] .context-menu-title,
 :root[data-theme="dark"] .settings-field > span,
 :root[data-theme="dark"] .struct-cell-title span,
 :root[data-theme="dark"] .struct-cell-field > span,
@@ -2038,7 +2124,11 @@ select {
 :root[data-theme="dark"] .badge.key.duplicate,
 :root[data-theme="dark"] .key-button.duplicate,
 :root[data-theme="dark"] .row-error,
-:root[data-theme="dark"] .error-strip {
+:root[data-theme="dark"] .error-strip,
+:root[data-theme="dark"] .settings-problems,
+:root[data-theme="dark"] .tag-token-input.invalid,
+:root[data-theme="dark"] .settings-field input.invalid,
+:root[data-theme="dark"] .grid-cell-shell.invalid {
   background: var(--color-danger-bg);
   color: var(--color-danger-text);
   border-color: var(--color-danger-border);
@@ -2049,6 +2139,10 @@ select {
 :root[data-theme="dark"] .diagnostic-line.error,
 :root[data-theme="dark"] .error-icon,
 :root[data-theme="dark"] .row-error-marker {
+  color: var(--color-danger-text);
+}
+
+:root[data-theme="dark"] .profile-row-errors {
   color: var(--color-danger-text);
 }
 
