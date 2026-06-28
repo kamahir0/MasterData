@@ -74,7 +74,7 @@ struct ProjectSnapshot {
 #[serde(rename_all = "camelCase")]
 struct FileNode {
     path: PathBuf,
-    relative_path: PathBuf,
+    relative_path: String,
     name: String,
     kind: String,
     type_name: Option<String>,
@@ -86,7 +86,7 @@ struct FileNode {
 #[serde(rename_all = "camelCase")]
 struct DirectoryNode {
     path: PathBuf,
-    relative_path: PathBuf,
+    relative_path: String,
     name: String,
     modified_millis: u128,
 }
@@ -95,7 +95,7 @@ struct DirectoryNode {
 #[serde(rename_all = "camelCase")]
 struct DefinitionDocument {
     path: PathBuf,
-    relative_path: PathBuf,
+    relative_path: String,
     kind: String,
     type_name: String,
     definition: Definition,
@@ -887,7 +887,7 @@ fn load_project_snapshot(root: PathBuf) -> Result<ProjectSnapshot> {
 
     for source in sources {
         let path = source.path.clone();
-        let relative_path = source.relative_path.clone();
+        let relative_path = source.relative_path.to_string_lossy().replace('\\', "/");
         let parsed = SourceDefinition::parse(source);
         match parsed {
             Ok(source_definition) => {
@@ -958,7 +958,7 @@ fn document_from_definition(
     path: &Path,
     definition: Definition,
 ) -> Result<DefinitionDocument> {
-    let relative_path = path.strip_prefix(master_root).unwrap_or(path).to_path_buf();
+    let relative_path = to_relative_slash_path(master_root, path);
     Ok(DefinitionDocument {
         path: path.to_path_buf(),
         relative_path,
@@ -977,10 +977,7 @@ fn scan_master_directories(master_root: &Path) -> Result<Vec<DirectoryNode>> {
             continue;
         }
         let path = entry.path().to_path_buf();
-        let relative_path = path
-            .strip_prefix(master_root)
-            .unwrap_or(&path)
-            .to_path_buf();
+        let relative_path = to_relative_slash_path(master_root, &path);
         directories.push(DirectoryNode {
             name: path
                 .file_name()
@@ -1216,4 +1213,9 @@ fn map_diagnostics(diagnostics: &DiagnosticBag) -> Vec<EditorDiagnostic> {
 
 fn to_string(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+fn to_relative_slash_path(base: &Path, path: &Path) -> String {
+    let relative = path.strip_prefix(base).unwrap_or(path);
+    relative.to_string_lossy().replace('\\', "/")
 }
