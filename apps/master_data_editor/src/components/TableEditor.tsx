@@ -864,9 +864,9 @@ function RecordsGrid({
       );
       if (!target) return;
       if (edit) {
-        const input = target.querySelector<HTMLInputElement>("input");
+        const input = target.querySelector<HTMLElement>("input, button, select, textarea");
         input?.focus();
-        input?.select();
+        if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) input.select();
       } else {
         target.focus();
       }
@@ -943,7 +943,7 @@ function RecordsGrid({
     focusRelativeGridInput(visibleRowIndex, field, 0, 1);
   };
 
-  const handleEditingInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, visibleRowIndex: number, field: GridField) => {
+  const handleEditingInputKeyDown = (event: React.KeyboardEvent<HTMLElement>, visibleRowIndex: number, field: GridField) => {
     event.stopPropagation();
     if (event.key === "Escape") {
       event.preventDefault();
@@ -1249,6 +1249,22 @@ function RecordsGrid({
                               placeholder={placeholder}
                               value={formatValue(row.data[field.name])}
                               zeroOption={enumInfo.defaultMemberName}
+                              onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
+                              onChange={(value) =>
+                                updateCell(document.relativePath, entry.originalIndex, field.name, value, {
+                                  historyGroup: inputGroup(`cell-${entry.originalIndex}-${field.name}`)
+                                })
+                              }
+                              onFocus={() => {
+                                beginInputGroup(`cell-${entry.originalIndex}-${field.name}`);
+                                setActiveGridCell(virtualRow.index, fieldIndex, "edit");
+                              }}
+                              onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
+                            />
+                          ) : field.type === "bool" ? (
+                            <BoolToggleInput
+                              className="grid-bool-toggle"
+                              value={row.data[field.name]}
                               onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
                               onChange={(value) =>
                                 updateCell(document.relativePath, entry.originalIndex, field.name, value, {
@@ -1765,10 +1781,12 @@ function StructFieldInput({
   const enumMembers = enumMemberOptions(documents, field.type);
   if (field.type === "bool") {
     return (
-      <select value={String(Boolean(value))} onChange={(event) => onChange(event.target.value === "true")}>
-        <option value="false">false</option>
-        <option value="true">true</option>
-      </select>
+      <BoolToggleInput
+        value={value}
+        onBlur={onBlur}
+        onChange={onChange}
+        onFocus={onFocus}
+      />
     );
   }
   if (enumMembers.length > 0) {
@@ -1812,6 +1830,50 @@ function StructFieldInput({
       onFocus={onFocus}
     />
   );
+}
+
+function BoolToggleInput({
+  className,
+  onBlur,
+  onChange,
+  onFocus,
+  onKeyDown,
+  value
+}: {
+  className?: string;
+  onBlur?: () => void;
+  onChange: (value: boolean) => void;
+  onFocus?: () => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
+  value: MasterValue | undefined;
+}) {
+  const checked = booleanValue(value);
+  return (
+    <button
+      aria-pressed={checked}
+      className={clsx("bool-toggle-input", checked && "checked", className)}
+      type="button"
+      onBlur={onBlur}
+      onClick={() => onChange(!checked)}
+      onFocus={onFocus}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (event.defaultPrevented) return;
+        if (event.key !== " ") return;
+        event.preventDefault();
+        onChange(!checked);
+      }}
+    >
+      <span className="bool-toggle-track">
+        <span className="bool-toggle-thumb" />
+      </span>
+      <span className="bool-toggle-label">{checked ? "true" : "false"}</span>
+    </button>
+  );
+}
+
+function booleanValue(value: MasterValue | undefined) {
+  return value === true || value === "true" || value === 1;
 }
 
 function structDefinitionMap(documents: Record<string, DefinitionDocument>) {

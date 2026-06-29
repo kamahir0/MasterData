@@ -1303,6 +1303,56 @@ select {
   cursor: text;
 }
 
+.bool-toggle-input {
+  justify-content: flex-start;
+  width: 100%;
+  height: var(--grid-input-height);
+  border-color: #b7c5d4;
+  background: #ffffff;
+  padding: 0 7px;
+}
+
+.bool-toggle-input.checked {
+  border-color: #3f8ac3;
+  background: #edf7ff;
+}
+
+.bool-toggle-track {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 30px;
+  height: 16px;
+  border-radius: 999px;
+  background: #b4c0cc;
+  transition: background 120ms ease;
+}
+
+.bool-toggle-input.checked .bool-toggle-track {
+  background: #2477b9;
+}
+
+.bool-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(31, 45, 61, 0.24);
+  transition: transform 120ms ease;
+}
+
+.bool-toggle-input.checked .bool-toggle-thumb {
+  transform: translateX(14px);
+}
+
+.bool-toggle-label {
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+
 .enum-cell-input {
   position: relative;
   width: 100%;
@@ -2061,10 +2111,24 @@ select {
 :root[data-theme="dark"] .inline-edit-item input,
 :root[data-theme="dark"] .tag-token-input,
 :root[data-theme="dark"] .struct-cell-field textarea,
+:root[data-theme="dark"] .bool-toggle-input,
 :root[data-theme="dark"] .grid-cell-shell.editing .grid-cell-input {
   background: var(--color-surface);
   color: var(--color-text-strong);
   border-color: var(--color-border-emphasis);
+}
+
+:root[data-theme="dark"] .bool-toggle-input.checked {
+  background: #183d5d;
+  border-color: var(--color-accent);
+}
+
+:root[data-theme="dark"] .bool-toggle-track {
+  background: #596878;
+}
+
+:root[data-theme="dark"] .bool-toggle-input.checked .bool-toggle-track {
+  background: var(--color-accent-action);
 }
 
 :root[data-theme="dark"] .tag-token-input.is-focused {
