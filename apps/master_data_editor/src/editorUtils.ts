@@ -18,6 +18,7 @@ export function availableTypeOptions(documents: Record<string, DefinitionDocumen
 }
 
 export function availableTypeOptionGroups(documents: Record<string, DefinitionDocument>, current?: string): TypeOptionGroup[] {
+  const currentBase = unwrapListType(current ?? "");
   const custom = Object.values(documents)
     .filter((document) => document.definition.kind === "enum" || document.definition.kind === "struct");
   const enums = custom
@@ -28,16 +29,28 @@ export function availableTypeOptionGroups(documents: Record<string, DefinitionDo
     .filter((document) => document.definition.kind === "struct")
     .map((document) => document.typeName)
     .sort();
-  const base = [...BUILTIN_TYPES, ...enums, ...structs];
   const groups: TypeOptionGroup[] = [
     { label: "Primitive", options: BUILTIN_TYPES },
     { label: "Enum", options: enums },
-    { label: "Struct", options: structs },
-    { label: "List", options: base.map((type) => `list<${type}>`) }
+    { label: "Struct", options: structs }
   ].filter((group) => group.options.length > 0);
   const known = new Set(groups.flatMap((group) => group.options));
-  if (current && !known.has(current)) groups.unshift({ label: "Current", options: [current] });
+  if (currentBase && !known.has(currentBase)) groups.unshift({ label: "Current", options: [currentBase] });
   return groups;
+}
+
+export function isListType(type: string) {
+  return /^list<.+>$/.test(type.trim());
+}
+
+export function unwrapListType(type: string) {
+  const trimmed = type.trim();
+  return isListType(trimmed) ? trimmed.slice("list<".length, -1).trim() : trimmed;
+}
+
+export function setListType(type: string, list: boolean) {
+  const base = unwrapListType(type);
+  return list ? `list<${base}>` : base;
 }
 
 export function messagePackKey(field: FieldDefinition, fallbackIndex: number) {

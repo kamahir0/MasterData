@@ -35,6 +35,19 @@ if [ -z "$APP_BUNDLE" ]; then
 fi
 
 DESTINATION="/Applications/$(basename "$APP_BUNDLE")"
+LEGACY_DESTINATIONS=(
+  "/Applications/Lilja.MasterData Editor.app"
+)
+
+for LEGACY_DESTINATION in "${LEGACY_DESTINATIONS[@]}"; do
+  if [ "$LEGACY_DESTINATION" != "$DESTINATION" ] && [ -e "$LEGACY_DESTINATION" ]; then
+    if [ -w "/Applications" ]; then
+      rm -rf "$LEGACY_DESTINATION"
+    else
+      sudo rm -rf "$LEGACY_DESTINATION"
+    fi
+  fi
+done
 
 if [ -w "/Applications" ]; then
   if [ -e "$DESTINATION" ]; then

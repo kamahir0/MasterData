@@ -6,7 +6,6 @@ import { listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
 import { coerceValue, useEditorStore } from "../store";
 import {
-  availableTypeOptionGroups,
   cloneMasterValue,
   createField,
   duplicateMessagePackKeys,
@@ -21,6 +20,7 @@ import {
 } from "../editorUtils";
 import type { DefinitionDocument, FieldDefinition, MasterRefDefinition, MasterValue, RowDefinition, StructDefinition, TableDefinition } from "../types";
 import { EditorHeader } from "./EditorHost";
+import { FieldTypeControl, MasterValueInput, enumInfoForType, type EnumInfo } from "./MasterValueEditor";
 import { isValidTagName, TagTokenInput, uniqueTags } from "./TagTokenInput";
 
 const ROW_NUMBER_WIDTH = 64;
@@ -36,12 +36,6 @@ type ActiveCellState = ActiveCell & { mode: "select" | "edit" };
 type SelectedRowState = { visibleRowIndex: number; originalIndex: number };
 type TableCreateEvent = { kind: "field" | "record" };
 type TableIndexedMenuEvent = { action: string; index: number };
-type EnumInfo = {
-  flags: boolean;
-  members: string[];
-  hasZeroDefault: boolean;
-  defaultMemberName?: string;
-};
 type SelectedStructCell = {
   fieldIndex: number;
   originalIndex: number;
@@ -1039,27 +1033,18 @@ function RecordsGrid({
                   onFocus={() => beginInputGroup(`column-name-${index}`)}
                   onPointerDown={(event) => event.stopPropagation()}
                 />
-                <select
-                  className="column-type-select"
-                  value={field.type}
-                  onChange={(event) =>
+                <FieldTypeControl
+                  className="column-type-control"
+                  documents={documents}
+                  type={field.type}
+                  onChange={(nextType) =>
                     updateDocument(document.relativePath, `Change ${field.name} type`, (draft) => {
                       if (draft.definition.kind !== "table") return;
-                      draft.definition.fields[index].type = event.target.value;
+                      draft.definition.fields[index].type = nextType;
                     })
                   }
                   onPointerDown={(event) => event.stopPropagation()}
-                >
-                  {availableTypeOptionGroups(documents, field.type).map((group) => (
-                    <optgroup key={group.label} label={group.label}>
-                      {group.options.map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                />
               </div>
             ))}
             <div className="grid-add-field-head">
@@ -1240,64 +1225,27 @@ function RecordsGrid({
                         }}
                       >
                         {isEditing && !isFlagsEnum ? (
-                          enumInfo ? (
-                            <EnumCellInput
-                              dataGridField={fieldIndex}
-                              dataGridRow={virtualRow.index}
-                              flags={enumInfo.flags}
-                              options={enumInfo.members}
-                              placeholder={placeholder}
-                              value={formatValue(row.data[field.name])}
-                              zeroOption={enumInfo.defaultMemberName}
-                              onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
-                              onChange={(value) =>
-                                updateCell(document.relativePath, entry.originalIndex, field.name, value, {
-                                  historyGroup: inputGroup(`cell-${entry.originalIndex}-${field.name}`)
-                                })
-                              }
-                              onFocus={() => {
-                                beginInputGroup(`cell-${entry.originalIndex}-${field.name}`);
-                                setActiveGridCell(virtualRow.index, fieldIndex, "edit");
-                              }}
-                              onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
-                            />
-                          ) : field.type === "bool" ? (
-                            <BoolToggleInput
-                              className="grid-bool-toggle"
-                              value={row.data[field.name]}
-                              onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
-                              onChange={(value) =>
-                                updateCell(document.relativePath, entry.originalIndex, field.name, value, {
-                                  historyGroup: inputGroup(`cell-${entry.originalIndex}-${field.name}`)
-                                })
-                              }
-                              onFocus={() => {
-                                beginInputGroup(`cell-${entry.originalIndex}-${field.name}`);
-                                setActiveGridCell(virtualRow.index, fieldIndex, "edit");
-                              }}
-                              onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
-                            />
-                          ) : (
-                            <input
-                              className="grid-cell-input"
-                              data-grid-field={fieldIndex}
-                              data-grid-row={virtualRow.index}
-                              placeholder={placeholder}
-                              value={formatValue(row.data[field.name])}
-                              onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
-                              onFocus={() => {
-                                beginInputGroup(`cell-${entry.originalIndex}-${field.name}`);
-                                setActiveGridCell(virtualRow.index, fieldIndex, "edit");
-                              }}
-                              onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
-                              onPaste={(event) => handlePaste(event, entry.originalIndex, fieldIndex)}
-                              onChange={(event) =>
-                                updateCell(document.relativePath, entry.originalIndex, field.name, coerceValue(field.type, event.target.value), {
-                                  historyGroup: inputGroup(`cell-${entry.originalIndex}-${field.name}`)
-                                })
-                              }
-                            />
-                          )
+                          <MasterValueInput
+                            dataGridField={fieldIndex}
+                            dataGridRow={virtualRow.index}
+                            documents={documents}
+                            placeholder={placeholder}
+                            structDefinitions={structDefinitions}
+                            type={field.type}
+                            value={row.data[field.name]}
+                            onBlur={() => endInputGroup(`cell-${entry.originalIndex}-${field.name}`)}
+                            onChange={(value) =>
+                              updateCell(document.relativePath, entry.originalIndex, field.name, value, {
+                                historyGroup: inputGroup(`cell-${entry.originalIndex}-${field.name}`)
+                              })
+                            }
+                            onFocus={() => {
+                              beginInputGroup(`cell-${entry.originalIndex}-${field.name}`);
+                              setActiveGridCell(virtualRow.index, fieldIndex, "edit");
+                            }}
+                            onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
+                            onPaste={(event) => handlePaste(event, entry.originalIndex, fieldIndex)}
+                          />
                         ) : (
                           <button
                             className="grid-cell-display"
@@ -1447,163 +1395,6 @@ function RowContextMenu({
       <button disabled={!canPaste} onClick={onPaste}>Paste Record</button>
     </div>
   );
-}
-
-function EnumCellInput({
-  dataGridField,
-  dataGridRow,
-  flags,
-  onBlur,
-  onChange,
-  onFocus,
-  onKeyDown,
-  options,
-  placeholder,
-  value,
-  zeroOption
-}: {
-  dataGridField: number;
-  dataGridRow: number;
-  flags: boolean;
-  onBlur: () => void;
-  onChange: (value: string) => void;
-  onFocus: () => void;
-  onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-  options: string[];
-  placeholder: string;
-  value: string;
-  zeroOption?: string;
-}) {
-  const [focused, setFocused] = useState(false);
-  if (flags) {
-    const zero = zeroOption ?? placeholder;
-    const parts = enumValueParts(value);
-    const selected = new Set(parts);
-    const flagOptions = options.filter((option) => option !== zero);
-    const zeroSelected = parts.length === 0 || selected.has(zero);
-    const displayValue = parts.length === 0 ? "" : parts.join(", ");
-    const showMenu = focused;
-
-    const chooseZero = () => {
-      onChange(zero);
-      setFocused(false);
-    };
-
-    const toggleFlag = (option: string) => {
-      const next = new Set(parts.filter((part) => part !== zero));
-      if (next.has(option)) next.delete(option);
-      else next.add(option);
-      onChange(next.size === 0 ? zero : [...next].join(", "));
-    };
-
-    return (
-      <div className="enum-cell-input flags-cell-input">
-        <input
-          readOnly
-          className="grid-cell-input"
-          data-grid-field={dataGridField}
-          data-grid-row={dataGridRow}
-          placeholder={placeholder}
-          value={displayValue}
-          onBlur={() => {
-            onBlur();
-            window.setTimeout(() => setFocused(false), 120);
-          }}
-          onClick={() => setFocused(true)}
-          onFocus={() => {
-            setFocused(true);
-            onFocus();
-          }}
-          onKeyDown={(event) => {
-            onKeyDown(event);
-            if (event.defaultPrevented) return;
-            if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === " ") {
-              event.preventDefault();
-              setFocused(true);
-            }
-          }}
-        />
-        {showMenu && (
-          <div className="enum-cell-menu flags-cell-menu">
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={chooseZero}
-            >
-              <input readOnly checked={zeroSelected} type="checkbox" />
-              <span>{zero}</span>
-            </button>
-            {flagOptions.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => toggleFlag(option)}
-              >
-                <input readOnly checked={!zeroSelected && selected.has(option)} type="checkbox" />
-                <span>{option}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const query = flags ? value.split(",").at(-1)?.trim() ?? "" : value.trim();
-  const candidates = options.filter((option) => !query || option.toLowerCase().includes(query.toLowerCase()));
-  const showCandidates = focused && candidates.length > 0;
-
-  const choose = (option: string) => {
-    onChange(flags ? replaceLastEnumSegment(value, option) : option);
-    setFocused(false);
-  };
-
-  return (
-    <div className="enum-cell-input">
-      <input
-        className="grid-cell-input"
-        data-grid-field={dataGridField}
-        data-grid-row={dataGridRow}
-        placeholder={placeholder}
-        value={value}
-        onBlur={() => {
-          onBlur();
-          window.setTimeout(() => setFocused(false), 120);
-        }}
-        onChange={(event) => onChange(event.target.value)}
-        onFocus={() => {
-          setFocused(true);
-          onFocus();
-        }}
-        onKeyDown={(event) => {
-          onKeyDown(event);
-          if (event.defaultPrevented) return;
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") setFocused(true);
-        }}
-      />
-      {showCandidates && (
-        <div className="enum-cell-menu">
-          {candidates.map((candidate) => (
-            <button
-              key={candidate}
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => choose(candidate)}
-            >
-              {candidate}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function replaceLastEnumSegment(value: string, option: string) {
-  const parts = value.split(",");
-  parts[parts.length - 1] = ` ${option}`;
-  return parts.map((part, index) => (index === 0 ? part.trim() : part.trim())).filter(Boolean).join(", ");
 }
 
 function enumValueParts(value: string) {
@@ -1778,102 +1569,18 @@ function StructFieldInput({
   value: MasterValue;
 }) {
   const { documents } = useEditorStore();
-  const enumMembers = enumMemberOptions(documents, field.type);
-  if (field.type === "bool") {
-    return (
-      <BoolToggleInput
-        value={value}
-        onBlur={onBlur}
-        onChange={onChange}
-        onFocus={onFocus}
-      />
-    );
-  }
-  if (enumMembers.length > 0) {
-    return (
-      <select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>
-        <option value="">{placeholder}</option>
-        {enumMembers.map((member) => (
-          <option key={member} value={member}>
-            {member}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  if (field.type.startsWith("list<") || structDefinitions[field.type]) {
-    return (
-      <textarea
-        defaultValue={formatJsonValue(value)}
-        placeholder={placeholder}
-        onBlur={(event) => {
-          const raw = event.target.value.trim();
-          if (!raw) {
-            onChange(field.type.startsWith("list<") ? [] : {});
-            return;
-          }
-          try {
-            onChange(JSON.parse(raw) as MasterValue);
-          } catch {
-            onChange(raw);
-          }
-        }}
-      />
-    );
-  }
   return (
-    <input
+    <MasterValueInput
+      documents={documents}
       placeholder={placeholder}
-      value={formatValue(value)}
       onBlur={onBlur}
-      onChange={(event) => onChange(coerceValue(field.type, event.target.value))}
+      onChange={onChange}
       onFocus={onFocus}
+      structDefinitions={structDefinitions}
+      type={field.type}
+      value={value}
     />
   );
-}
-
-function BoolToggleInput({
-  className,
-  onBlur,
-  onChange,
-  onFocus,
-  onKeyDown,
-  value
-}: {
-  className?: string;
-  onBlur?: () => void;
-  onChange: (value: boolean) => void;
-  onFocus?: () => void;
-  onKeyDown?: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
-  value: MasterValue | undefined;
-}) {
-  const checked = booleanValue(value);
-  return (
-    <button
-      aria-pressed={checked}
-      className={clsx("bool-toggle-input", checked && "checked", className)}
-      type="button"
-      onBlur={onBlur}
-      onClick={() => onChange(!checked)}
-      onFocus={onFocus}
-      onKeyDown={(event) => {
-        onKeyDown?.(event);
-        if (event.defaultPrevented) return;
-        if (event.key !== " ") return;
-        event.preventDefault();
-        onChange(!checked);
-      }}
-    >
-      <span className="bool-toggle-track">
-        <span className="bool-toggle-thumb" />
-      </span>
-      <span className="bool-toggle-label">{checked ? "true" : "false"}</span>
-    </button>
-  );
-}
-
-function booleanValue(value: MasterValue | undefined) {
-  return value === true || value === "true" || value === 1;
 }
 
 function structDefinitionMap(documents: Record<string, DefinitionDocument>) {
@@ -1939,10 +1646,6 @@ function isEmptyCellValue(value: MasterValue | undefined) {
 
 function isEditableElement(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
-}
-
-function enumMemberOptions(documents: Record<string, DefinitionDocument>, typeName: string) {
-  return enumInfoForType(documents, typeName)?.members ?? [];
 }
 
 function formatCellDisplayValue(
@@ -2041,33 +1744,6 @@ function enumCellIssues(fieldName: string, value: MasterValue | undefined, enumI
     return [`${fieldName}: unknown enum member ${unknown.map((part) => `\`${part || "(empty)"}\``).join(", ")}.`];
   }
   return [];
-}
-
-function enumInfoForType(documents: Record<string, DefinitionDocument>, typeName: string): EnumInfo | undefined {
-  const document = Object.values(documents).find(
-    (item) => item.definition.kind === "enum" && item.typeName === typeName
-  );
-  if (!document || document.definition.kind !== "enum") return undefined;
-  const explicitZeroMember = document.definition.members.find(
-    (member) => typeof member !== "string" && member.value === 0
-  );
-  const zeroIsVirtual = Boolean(document.definition.flags) && !explicitZeroMember;
-  const rawMembers = document.definition.members.map((member) => (typeof member === "string" ? member : member.name));
-  const members = zeroIsVirtual && !rawMembers.includes("None") ? ["None", ...rawMembers] : rawMembers;
-  const defaultMemberName = typeof explicitZeroMember === "string"
-    ? undefined
-    : explicitZeroMember?.name ?? (zeroIsVirtual ? "None" : undefined);
-  return {
-    flags: Boolean(document.definition.flags),
-    members,
-    hasZeroDefault: Boolean(defaultMemberName),
-    defaultMemberName
-  };
-}
-
-function formatJsonValue(value: MasterValue) {
-  if (typeof value === "string") return value;
-  return JSON.stringify(value ?? {}, null, 2);
 }
 
 function useFilteredRows(table: TableDefinition) {

@@ -3,13 +3,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { useEditorStore } from "../store";
 import {
-  availableTypeOptionGroups,
   createField,
   duplicateMessagePackKeys,
   messagePackKey
 } from "../editorUtils";
 import type { DefinitionDocument } from "../types";
 import { EditorHeader } from "./EditorHost";
+import { FieldTypeControl } from "./MasterValueEditor";
 
 export function StructEditor({ document }: { document: DefinitionDocument }) {
   const { documents, updateDocument } = useEditorStore();
@@ -87,25 +87,16 @@ export function StructEditor({ document }: { document: DefinitionDocument }) {
               }
               onFocus={() => beginInputGroup(`field-name-${index}`)}
             />
-            <select
-              value={field.type}
-              onChange={(event) =>
+            <FieldTypeControl
+              documents={documents}
+              type={field.type}
+              onChange={(nextType) =>
                 updateDocument(document.relativePath, "Edit struct field type", (draft) => {
                   if (draft.definition.kind !== "struct") return;
-                  draft.definition.fields[index].type = event.target.value;
+                  draft.definition.fields[index].type = nextType;
                 })
               }
-            >
-              {availableTypeOptionGroups(documents, field.type).map((group) => (
-                <optgroup key={group.label} label={group.label}>
-                  {group.options.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            />
             <button
               className={clsx("key-edit-badge", "badge", "key", duplicateKeyIndexes.has(messagePackKey(field, index)) && "duplicate")}
               onClick={() => editMessagePackKey(index)}

@@ -1081,6 +1081,17 @@ select {
   font: inherit;
 }
 
+.master-value-textarea {
+  width: 100%;
+  min-height: var(--grid-input-height);
+  resize: vertical;
+  border: 1px solid #c8d0d9;
+  border-radius: 5px;
+  background: #ffffff;
+  padding: 6px;
+  font: inherit;
+}
+
 .grid-header,
 .grid-row {
   display: grid;
@@ -1148,10 +1159,33 @@ select {
 }
 
 .column-name-input,
-.column-type-select {
+.field-type-select {
   width: 100%;
   height: min(30px, var(--grid-input-height));
   font-size: 12px;
+}
+
+.field-type-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+
+.field-list-toggle {
+  height: min(30px, var(--grid-input-height));
+  min-width: 48px;
+  border-color: #c2ccd6;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.field-list-toggle.checked {
+  border-color: #3f8ac3;
+  background: #edf7ff;
+  color: #155f99;
 }
 
 .gap-marker {
@@ -2111,11 +2145,18 @@ select {
 :root[data-theme="dark"] .inline-edit-item input,
 :root[data-theme="dark"] .tag-token-input,
 :root[data-theme="dark"] .struct-cell-field textarea,
+:root[data-theme="dark"] .master-value-textarea,
 :root[data-theme="dark"] .bool-toggle-input,
 :root[data-theme="dark"] .grid-cell-shell.editing .grid-cell-input {
   background: var(--color-surface);
   color: var(--color-text-strong);
   border-color: var(--color-border-emphasis);
+}
+
+:root[data-theme="dark"] .field-list-toggle.checked {
+  background: #183d5d;
+  border-color: var(--color-accent);
+  color: var(--color-text-strong);
 }
 
 :root[data-theme="dark"] .bool-toggle-input.checked {
