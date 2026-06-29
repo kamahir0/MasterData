@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-APP_TARGET_DIR="$APP_ROOT/src-tauri/target/release/bundle/macos"
+WORKSPACE_ROOT="$(cd "$APP_ROOT/../.." && pwd)"
+APP_TARGET_DIR="$WORKSPACE_ROOT/target/release/bundle/macos"
 
 cd "$APP_ROOT"
 
@@ -34,6 +35,8 @@ if [ -z "$APP_BUNDLE" ]; then
 fi
 
 xattr -dr com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
+touch "$APP_BUNDLE"
+touch "$APP_BUNDLE/Contents/Info.plist"
 open "$APP_BUNDLE"
 
 echo "Opened: $APP_BUNDLE"

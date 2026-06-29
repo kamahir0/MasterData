@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-APP_TARGET_DIR="$APP_ROOT/src-tauri/target/release/bundle/macos"
+WORKSPACE_ROOT="$(cd "$APP_ROOT/../.." && pwd)"
+APP_TARGET_DIR="$WORKSPACE_ROOT/target/release/bundle/macos"
 
 cd "$APP_ROOT"
 
@@ -49,6 +50,19 @@ else
   sudo ditto "$APP_BUNDLE" "$DESTINATION"
   sudo xattr -dr com.apple.quarantine "$DESTINATION" 2>/dev/null || true
 fi
+
+if [ -w "$DESTINATION" ] && [ -w "$DESTINATION/Contents/Info.plist" ]; then
+  touch "$DESTINATION"
+  touch "$DESTINATION/Contents/Info.plist"
+else
+  sudo touch "$DESTINATION"
+  sudo touch "$DESTINATION/Contents/Info.plist"
+fi
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREGISTER" ]; then
+  "$LSREGISTER" -f "$DESTINATION" 2>/dev/null || true
+fi
+
 open "$DESTINATION"
 
 echo "Installed and opened: $DESTINATION"
