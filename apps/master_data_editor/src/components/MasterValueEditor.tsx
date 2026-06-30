@@ -1,8 +1,8 @@
 import clsx from "clsx";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { coerceValue } from "../store";
 import { availableTypeOptionGroups, isListType, setListType, unwrapListType } from "../editorUtils";
-import type { DefinitionDocument, FieldDefinition, MasterValue, StructDefinition } from "../types";
+import type { DefinitionDocument, MasterValue, StructDefinition } from "../types";
 
 export type EnumInfo = {
   flags: boolean;
@@ -44,15 +44,28 @@ export function FieldTypeControl({
           </optgroup>
         ))}
       </select>
-      <button
-        aria-pressed={list}
-        className={clsx("field-list-toggle", list && "checked")}
-        title="Toggle list type"
-        type="button"
-        onClick={() => onChange(setListType(type, !list))}
-      >
-        List
-      </button>
+      <div className="field-cardinality-control" role="group" aria-label="Value cardinality">
+        <button
+          aria-pressed={!list}
+          aria-label="Use a single value"
+          className={clsx("field-cardinality-option", !list && "checked")}
+          title="Use a single value"
+          type="button"
+          onClick={() => onChange(setListType(type, false))}
+        >
+          1
+        </button>
+        <button
+          aria-pressed={list}
+          aria-label="Use a list of values"
+          className={clsx("field-cardinality-option", list && "checked")}
+          title="Use a list of values"
+          type="button"
+          onClick={() => onChange(setListType(type, true))}
+        >
+          []
+        </button>
+      </div>
     </div>
   );
 }
@@ -86,6 +99,23 @@ export function MasterValueInput({
   type: string;
   value: MasterValue | undefined;
 }) {
+  if (isListType(type)) {
+    return (
+      <ListValueInput
+        className={className}
+        documents={documents}
+        elementType={unwrapListType(type)}
+        onBlur={onBlur}
+        onChange={onChange}
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        structDefinitions={structDefinitions}
+        value={value}
+      />
+    );
+  }
+
   const enumInfo = enumInfoForType(documents, type);
   if (type === "bool") {
     return (
@@ -115,7 +145,7 @@ export function MasterValueInput({
       />
     );
   }
-  if (isListType(type) || structDefinitions[type]) {
+  if (structDefinitions[type]) {
     return (
       <textarea
         className={clsx("master-value-textarea", className)}
@@ -125,7 +155,7 @@ export function MasterValueInput({
           onBlur?.();
           const raw = event.target.value.trim();
           if (!raw) {
-            onChange(isListType(type) ? [] : {});
+            onChange({});
             return;
           }
           try {
@@ -152,6 +182,180 @@ export function MasterValueInput({
       onKeyDown={onKeyDown}
       onPaste={onPaste}
     />
+  );
+}
+
+function ListValueInput({
+  className,
+  documents,
+  elementType,
+  onBlur,
+  onChange,
+  onFocus,
+  onKeyDown,
+  placeholder,
+  structDefinitions,
+  value
+}: {
+  className?: string;
+  documents: Record<string, DefinitionDocument>;
+  elementType: string;
+  onBlur?: () => void;
+  onChange: (value: MasterValue[]) => void;
+  onFocus?: () => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
+  placeholder: string;
+  structDefinitions: Record<string, StructDefinition>;
+  value: MasterValue | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const items = Array.isArray(value) ? value : [];
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (rootRef.current?.contains(target)) return;
+      setOpen(false);
+      onBlur?.();
+    };
+    window.addEventListener("pointerdown", close, true);
+    return () => window.removeEventListener("pointerdown", close, true);
+  }, [onBlur, open]);
+
+  const updateItem = (index: number, nextValue: MasterValue) => {
+    onChange(items.map((item, itemIndex) => (itemIndex === index ? nextValue : item)));
+  };
+
+  const addItem = () => {
+    onChange([...items, defaultValueForType(elementType, documents, structDefinitions)]);
+    setOpen(true);
+  };
+
+  const removeItem = (index: number) => {
+    onChange(items.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const moveItem = (index: number, delta: -1 | 1) => {
+    const nextIndex = index + delta;
+    if (nextIndex < 0 || nextIndex >= items.length) return;
+    const next = [...items];
+    const [item] = next.splice(index, 1);
+    next.splice(nextIndex, 0, item);
+    onChange(next);
+  };
+
+  return (
+    <div className={clsx("list-value-input", className)} ref={rootRef}>
+      <button
+        className={clsx("list-value-button", open && "open")}
+        type="button"
+        onClick={() => {
+          setOpen((current) => !current);
+          onFocus?.();
+        }}
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+      >
+        <span>{listSummary(items, elementType, placeholder, documents, structDefinitions)}</span>
+        <strong>{items.length}</strong>
+      </button>
+      {open && (
+        <div
+          className="list-value-popover"
+          onKeyDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="list-value-title">
+            <span>{elementType} list</span>
+            <button className="secondary-button compact" type="button" onClick={addItem}>
+              + Add
+            </button>
+          </div>
+          <div className="list-value-items">
+            {items.length === 0 && (
+              <div className="list-value-empty">Empty list</div>
+            )}
+            {items.map((item, index) => (
+              <div className="list-value-row" key={index}>
+                <div className="list-value-row-tools">
+                  <span>{index + 1}</span>
+                  <button disabled={index === 0} type="button" onClick={() => moveItem(index, -1)}>
+                    ↑
+                  </button>
+                  <button disabled={index === items.length - 1} type="button" onClick={() => moveItem(index, 1)}>
+                    ↓
+                  </button>
+                  <button className="danger-icon" type="button" onClick={() => removeItem(index)}>
+                    ×
+                  </button>
+                </div>
+                <ListItemValueEditor
+                  documents={documents}
+                  elementType={elementType}
+                  onChange={(nextValue) => updateItem(index, nextValue)}
+                  structDefinitions={structDefinitions}
+                  value={item}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListItemValueEditor({
+  documents,
+  elementType,
+  onChange,
+  structDefinitions,
+  value
+}: {
+  documents: Record<string, DefinitionDocument>;
+  elementType: string;
+  onChange: (value: MasterValue) => void;
+  structDefinitions: Record<string, StructDefinition>;
+  value: MasterValue | undefined;
+}) {
+  const structDefinition = structDefinitions[elementType];
+  if (!structDefinition) {
+    return (
+      <MasterValueInput
+        documents={documents}
+        placeholder={defaultPlaceholderForType(elementType, documents, structDefinitions)}
+        onChange={onChange}
+        structDefinitions={structDefinitions}
+        type={elementType}
+        value={value}
+      />
+    );
+  }
+
+  const map = objectValue(value);
+  const updateStructField = (fieldName: string, nextValue: MasterValue) => {
+    onChange({ ...map, [fieldName]: nextValue });
+  };
+
+  return (
+    <div className="list-struct-editor">
+      {structDefinition.fields.map((field) => (
+        <label className="list-struct-field" key={field.name}>
+          <span>{field.name}</span>
+          <MasterValueInput
+            documents={documents}
+            placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
+            onChange={(nextValue) => updateStructField(field.name, nextValue)}
+            structDefinitions={structDefinitions}
+            type={field.type}
+            value={map[field.name]}
+          />
+        </label>
+      ))}
+    </div>
   );
 }
 
@@ -365,6 +569,92 @@ function booleanValue(value: MasterValue | undefined) {
 function formatJsonValue(value: MasterValue | undefined) {
   if (typeof value === "string") return value;
   return JSON.stringify(value ?? {}, null, 2);
+}
+
+function defaultValueForType(
+  type: string,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): MasterValue {
+  if (isListType(type)) return [];
+  if (type === "bool") return false;
+  if (type === "int" || type === "long" || type === "float" || type === "double") return 0;
+  if (structDefinitions[type]) return {};
+  const enumInfo = enumInfoForType(documents, type);
+  if (enumInfo?.defaultMemberName) return enumInfo.defaultMemberName;
+  return "";
+}
+
+function defaultPlaceholderForType(
+  type: string,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  if (isListType(type)) return "[]";
+  if (type === "string") return "\"\"";
+  const enumInfo = enumInfoForType(documents, type);
+  if (enumInfo) return enumInfo.defaultMemberName ?? "0 (undefined)";
+  const structDefinition = structDefinitions[type];
+  if (structDefinition) return structPlaceholder(structDefinition, documents, structDefinitions);
+  return formatValue(defaultValueForType(type, documents, structDefinitions));
+}
+
+function objectValue(value: MasterValue | undefined): Record<string, MasterValue> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  return {};
+}
+
+function listSummary(
+  items: MasterValue[],
+  elementType: string,
+  placeholder: string,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+) {
+  if (items.length === 0) return placeholder || "[]";
+  const preview = items
+    .slice(0, 3)
+    .map((item) => displayValueForType(elementType, item, documents, structDefinitions))
+    .join("; ");
+  return items.length > 3 ? `${preview}; +${items.length - 3}` : preview;
+}
+
+function displayValueForType(
+  type: string,
+  value: MasterValue | undefined,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  if (value == null || value === "") return defaultPlaceholderForType(type, documents, structDefinitions);
+  if (isListType(type)) {
+    const items = Array.isArray(value) ? value : [];
+    return listSummary(items, unwrapListType(type), "[]", documents, structDefinitions);
+  }
+  const structDefinition = structDefinitions[type];
+  if (structDefinition) return structValueSummary(value, structDefinition, documents, structDefinitions);
+  return formatValue(value);
+}
+
+function structValueSummary(
+  value: MasterValue | undefined,
+  structDefinition: StructDefinition,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  const map = objectValue(value);
+  return structDefinition.fields
+    .map((field) => displayValueForType(field.type, map[field.name], documents, structDefinitions))
+    .join(", ");
+}
+
+function structPlaceholder(
+  structDefinition: StructDefinition,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  return structDefinition.fields
+    .map((field) => defaultPlaceholderForType(field.type, documents, structDefinitions))
+    .join(", ");
 }
 
 function formatValue(value: MasterValue | undefined): string {

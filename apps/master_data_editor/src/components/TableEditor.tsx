@@ -11,16 +11,18 @@ import {
   duplicateMessagePackKeys,
   duplicatePrimaryKeys,
   formatValue,
+  isListType,
   matchesTagRule,
   messagePackKey,
   moveFieldToGap,
   moveFieldToIndex,
   removeFieldName,
-  replaceFieldName
+  replaceFieldName,
+  unwrapListType
 } from "../editorUtils";
 import type { DefinitionDocument, FieldDefinition, MasterRefDefinition, MasterValue, RowDefinition, StructDefinition, TableDefinition } from "../types";
 import { EditorHeader } from "./EditorHost";
-import { FieldTypeControl, MasterValueInput, enumInfoForType, type EnumInfo } from "./MasterValueEditor";
+import { BoolToggleInput, FieldTypeControl, MasterValueInput, enumInfoForType, type EnumInfo } from "./MasterValueEditor";
 import { isValidTagName, TagTokenInput, uniqueTags } from "./TagTokenInput";
 
 const ROW_NUMBER_WIDTH = 64;
@@ -493,6 +495,35 @@ function RecordsGrid({
       setSelectedRow(undefined);
     }
   }, [rows, selectedRow]);
+
+  useEffect(() => {
+    const clearSelection = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (
+        target.closest(
+          [
+            ".grid-cell-shell",
+            ".row-head",
+            "[data-cell-popover='true']",
+            ".list-value-popover",
+            ".context-menu",
+            ".tree-create-menu",
+            ".tag-token-menu",
+            ".enum-cell-menu"
+          ].join(",")
+        )
+      ) {
+        return;
+      }
+      setActiveCell(undefined);
+      setSelectedRow(undefined);
+      setStructCell(undefined);
+      setFlagsCell(undefined);
+    };
+    window.addEventListener("pointerdown", clearSelection, true);
+    return () => window.removeEventListener("pointerdown", clearSelection, true);
+  }, []);
 
   const selectRow = (visibleRowIndex: number, originalIndex: number) => {
     setSelectedRow({ visibleRowIndex, originalIndex });
@@ -1246,6 +1277,14 @@ function RecordsGrid({
                             onKeyDown={(event) => handleEditingInputKeyDown(event, virtualRow.index, fieldIndex)}
                             onPaste={(event) => handlePaste(event, entry.originalIndex, fieldIndex)}
                           />
+                        ) : field.type === "bool" ? (
+                          <BoolToggleInput
+                            className="grid-bool-display"
+                            value={row.data[field.name]}
+                            onChange={(value) => updateCell(document.relativePath, entry.originalIndex, field.name, value)}
+                            onFocus={() => setActiveGridCell(virtualRow.index, fieldIndex, "select")}
+                            onKeyDown={(event) => handleSelectedCellKeyDown(event, virtualRow.index, fieldIndex)}
+                          />
                         ) : (
                           <button
                             className="grid-cell-display"
@@ -1654,9 +1693,33 @@ function formatCellDisplayValue(
   documents: Record<string, DefinitionDocument>,
   structDefinitions: Record<string, StructDefinition>
 ): string {
-  const structDefinition = structDefinitions[field.type];
+  return formatCellDisplayValueByType(field.type, value, documents, structDefinitions);
+}
+
+function formatCellDisplayValueByType(
+  type: string,
+  value: MasterValue | undefined,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  if (isEmptyCellValue(value)) return defaultPlaceholderForType(type, documents, structDefinitions);
+  if (isListType(type)) return formatListCellValue(value, unwrapListType(type), documents, structDefinitions);
+  const structDefinition = structDefinitions[type];
   if (structDefinition) return formatStructCellValue(value, structDefinition, documents, structDefinitions);
   return formatValue(value);
+}
+
+function formatListCellValue(
+  value: MasterValue | undefined,
+  elementType: string,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string {
+  const items = Array.isArray(value) ? value : [];
+  if (items.length === 0) return "[]";
+  return items
+    .map((item) => formatCellDisplayValueByType(elementType, item, documents, structDefinitions))
+    .join("; ");
 }
 
 function formatStructCellValue(
@@ -1670,7 +1733,7 @@ function formatStructCellValue(
     .map((field) => {
       const fieldValue = map[field.name];
       if (isEmptyCellValue(fieldValue)) return defaultPlaceholderForType(field.type, documents, structDefinitions);
-      return formatCellDisplayValue(field, fieldValue, documents, structDefinitions);
+      return formatCellDisplayValueByType(field.type, fieldValue, documents, structDefinitions);
     })
     .join(", ");
 }
@@ -1715,16 +1778,41 @@ function cellIssuesForField(
   structDefinitions: Record<string, StructDefinition>,
   label = field.name
 ): string[] {
-  const enumInfo = enumInfoForType(documents, field.type);
+  return cellIssuesForType(label, field.type, value, documents, structDefinitions);
+}
+
+function cellIssuesForType(
+  label: string,
+  type: string,
+  value: MasterValue | undefined,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string[] {
+  if (isListType(type)) return listCellIssues(label, value, unwrapListType(type), documents, structDefinitions);
+  const enumInfo = enumInfoForType(documents, type);
   if (enumInfo) return enumCellIssues(label, value, enumInfo);
-  const structDefinition = structDefinitions[field.type];
+  const structDefinition = structDefinitions[type];
   if (!structDefinition) return [];
   if (!isEmptyCellValue(value) && (typeof value !== "object" || Array.isArray(value))) {
     return [`${label}: struct value must be an object.`];
   }
   const map = objectValue(value);
   return structDefinition.fields.flatMap((structField) =>
-    cellIssuesForField(structField, map[structField.name], documents, structDefinitions, `${label}.${structField.name}`)
+    cellIssuesForType(`${label}.${structField.name}`, structField.type, map[structField.name], documents, structDefinitions)
+  );
+}
+
+function listCellIssues(
+  label: string,
+  value: MasterValue | undefined,
+  elementType: string,
+  documents: Record<string, DefinitionDocument>,
+  structDefinitions: Record<string, StructDefinition>
+): string[] {
+  if (isEmptyCellValue(value)) return [];
+  if (!Array.isArray(value)) return [`${label}: list value must be an array.`];
+  return value.flatMap((item, index) =>
+    cellIssuesForType(`${label}[${index}]`, elementType, item, documents, structDefinitions)
   );
 }
 

@@ -412,6 +412,10 @@ select {
   box-shadow: inset 0 0 0 2px #2f7fbd;
 }
 
+.tree-row:hover:not(.active):not(.drop-target):not(.inline-edit-row) {
+  background: #e7edf3;
+}
+
 .tree-row.active {
   background: #dceaf8;
   color: #0f4975;
@@ -1169,23 +1173,41 @@ select {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
   width: 100%;
 }
 
-.field-list-toggle {
+.field-cardinality-control {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
   height: min(30px, var(--grid-input-height));
-  min-width: 48px;
-  border-color: #c2ccd6;
-  padding: 0 7px;
-  font-size: 12px;
+  overflow: hidden;
+  border: 1px solid #c2ccd6;
+  border-radius: 5px;
+  background: #ffffff;
 }
 
-.field-list-toggle.checked {
-  border-color: #3f8ac3;
-  background: #edf7ff;
-  color: #155f99;
+.field-cardinality-option {
+  min-width: 30px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  justify-content: center;
+}
+
+.field-cardinality-option + .field-cardinality-option {
+  border-left: 1px solid #d8e0e8;
+}
+
+.field-cardinality-option.checked {
+  background: #2477b9;
+  color: #ffffff;
 }
 
 .gap-marker {
@@ -1341,14 +1363,25 @@ select {
   justify-content: flex-start;
   width: 100%;
   height: var(--grid-input-height);
-  border-color: #b7c5d4;
-  background: #ffffff;
-  padding: 0 7px;
+  border-color: transparent;
+  background: transparent;
+  padding: 0 5px;
 }
 
 .bool-toggle-input.checked {
-  border-color: #3f8ac3;
-  background: #edf7ff;
+  border-color: transparent;
+  background: transparent;
+}
+
+.bool-toggle-input:hover:not(:disabled),
+.bool-toggle-input.checked:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+}
+
+.bool-toggle-input:focus-visible {
+  outline: 2px solid #2f7fbd;
+  outline-offset: -2px;
 }
 
 .bool-toggle-track {
@@ -1385,6 +1418,144 @@ select {
 .bool-toggle-label {
   font-variant-numeric: tabular-nums;
   min-width: 34px;
+}
+
+.list-value-input {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.list-value-button {
+  justify-content: space-between;
+  width: 100%;
+  height: var(--grid-input-height);
+  border-color: #b7c5d4;
+  background: #ffffff;
+  padding: 0 7px;
+  min-width: 0;
+}
+
+.list-value-button span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-value-button strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  border-radius: 999px;
+  background: #e7eef5;
+  color: #345167;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.list-value-button.open {
+  border-color: #2f7fbd;
+  box-shadow: 0 0 0 2px rgba(47, 127, 189, 0.12);
+}
+
+.list-value-popover {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  width: max(320px, 100%);
+  max-width: min(560px, calc(100vw - 40px));
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #b9c6d4;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(31, 45, 61, 0.2);
+}
+
+.list-value-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  border-bottom: 1px solid #dde5ed;
+  background: #f6f8fb;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.list-value-items {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.list-value-empty {
+  color: #6a7784;
+  font-size: 12px;
+  padding: 8px 2px;
+}
+
+.list-value-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border: 1px solid #dce4ec;
+  border-radius: 5px;
+  background: #fbfcfd;
+  padding: 6px;
+}
+
+.list-value-row-tools {
+  display: grid;
+  grid-template-columns: 24px;
+  gap: 4px;
+  justify-items: center;
+  color: #5d6c79;
+  font-size: 11px;
+}
+
+.list-value-row-tools button {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+}
+
+.list-value-row-tools .danger-icon {
+  color: #9f2e22;
+}
+
+.list-struct-editor {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.list-struct-field {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  min-width: 0;
+}
+
+.list-struct-field > span {
+  overflow: hidden;
+  color: #5c6975;
+  font-size: 12px;
+  line-height: var(--grid-input-height);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .enum-cell-input {
@@ -2046,6 +2217,7 @@ select {
 :root[data-theme="dark"] .context-menu,
 :root[data-theme="dark"] .tag-token-menu,
 :root[data-theme="dark"] .enum-cell-menu,
+:root[data-theme="dark"] .list-value-popover,
 :root[data-theme="dark"] .struct-cell-popover,
 :root[data-theme="dark"] .records-panel,
 :root[data-theme="dark"] .simple-editor,
@@ -2065,6 +2237,7 @@ select {
 :root[data-theme="dark"] .row-head,
 :root[data-theme="dark"] .grid-header,
 :root[data-theme="dark"] .grid-add-field-head,
+:root[data-theme="dark"] .list-value-title,
 :root[data-theme="dark"] .struct-cell-title {
   background: var(--color-surface-alt);
   color: var(--color-text);
@@ -2131,6 +2304,10 @@ select {
   color: var(--color-selection-text);
 }
 
+:root[data-theme="dark"] .tree-row:hover:not(.active):not(.drop-target):not(.inline-edit-row) {
+  background: var(--color-hover);
+}
+
 :root[data-theme="dark"] .tree-row.drop-target {
   background: var(--color-drop-bg);
   box-shadow: inset 0 0 0 1px var(--color-accent);
@@ -2145,23 +2322,35 @@ select {
 :root[data-theme="dark"] .inline-edit-item input,
 :root[data-theme="dark"] .tag-token-input,
 :root[data-theme="dark"] .struct-cell-field textarea,
+:root[data-theme="dark"] .field-cardinality-control,
 :root[data-theme="dark"] .master-value-textarea,
 :root[data-theme="dark"] .bool-toggle-input,
+:root[data-theme="dark"] .list-value-button,
 :root[data-theme="dark"] .grid-cell-shell.editing .grid-cell-input {
   background: var(--color-surface);
   color: var(--color-text-strong);
   border-color: var(--color-border-emphasis);
 }
 
-:root[data-theme="dark"] .field-list-toggle.checked {
-  background: #183d5d;
-  border-color: var(--color-accent);
+:root[data-theme="dark"] .field-cardinality-option + .field-cardinality-option {
+  border-left-color: var(--color-border);
+}
+
+:root[data-theme="dark"] .field-cardinality-option.checked {
+  background: var(--color-accent-action);
   color: var(--color-text-strong);
 }
 
+:root[data-theme="dark"] .bool-toggle-input,
 :root[data-theme="dark"] .bool-toggle-input.checked {
-  background: #183d5d;
-  border-color: var(--color-accent);
+  background: transparent;
+  border-color: transparent;
+}
+
+:root[data-theme="dark"] .bool-toggle-input:hover:not(:disabled),
+:root[data-theme="dark"] .bool-toggle-input.checked:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
 }
 
 :root[data-theme="dark"] .bool-toggle-track {
@@ -2170,6 +2359,19 @@ select {
 
 :root[data-theme="dark"] .bool-toggle-input.checked .bool-toggle-track {
   background: var(--color-accent-action);
+}
+
+:root[data-theme="dark"] .list-value-button strong,
+:root[data-theme="dark"] .list-value-row {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+:root[data-theme="dark"] .list-struct-field > span,
+:root[data-theme="dark"] .list-value-empty,
+:root[data-theme="dark"] .list-value-row-tools {
+  color: var(--color-text-muted);
 }
 
 :root[data-theme="dark"] .tag-token-input.is-focused {
