@@ -15,6 +15,7 @@ use tauri::{AppHandle, Emitter, LogicalPosition, Window};
 
 const MENU_OPEN_PROJECT: &str = "file_open_project";
 const MENU_NEW_PROJECT: &str = "file_new_project";
+const MENU_CLOSE_PROJECT: &str = "file_close_project";
 const MENU_MASTER_CREATE_PREFIX: &str = "master_create:";
 const MENU_MASTER_ENTRY_PREFIX: &str = "master_entry:";
 const MENU_TABLE_CREATE_PREFIX: &str = "table_create:";
@@ -22,6 +23,7 @@ const MENU_TABLE_COLUMN_PREFIX: &str = "table_column:";
 const MENU_TABLE_RECORD_PREFIX: &str = "table_record:";
 const EVENT_OPEN_PROJECT: &str = "menu-open-project";
 const EVENT_NEW_PROJECT: &str = "menu-new-project";
+const EVENT_CLOSE_PROJECT: &str = "menu-close-project";
 const EVENT_MASTER_CREATE_ENTRY: &str = "master-create-entry";
 const EVENT_MASTER_ENTRY_ACTION: &str = "master-entry-action";
 const EVENT_TABLE_CREATE_ENTRY: &str = "table-create-entry";
@@ -751,13 +753,25 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+O"),
             )?;
+            let close_project = MenuItem::with_id(
+                app,
+                MENU_CLOSE_PROJECT,
+                "Close Project",
+                true,
+                Some("CmdOrCtrl+Shift+W"),
+            )?;
             let separator = PredefinedMenuItem::separator(app)?;
             for item in menu.items()? {
                 let Some(submenu) = item.as_submenu() else {
                     continue;
                 };
                 if submenu.text()? == "File" {
-                    submenu.prepend_items(&[&new_project, &open_project, &separator])?;
+                    submenu.prepend_items(&[
+                        &new_project,
+                        &open_project,
+                        &close_project,
+                        &separator,
+                    ])?;
                     break;
                 }
             }
@@ -770,6 +784,10 @@ pub fn run() {
             }
             if event.id() == MENU_OPEN_PROJECT {
                 let _ = app.emit(EVENT_OPEN_PROJECT, ());
+                return;
+            }
+            if event.id() == MENU_CLOSE_PROJECT {
+                let _ = app.emit(EVENT_CLOSE_PROJECT, ());
                 return;
             }
             let id = event.id().as_ref();

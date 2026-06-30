@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { GripVertical, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { coerceValue } from "../store";
 import { availableTypeOptionGroups, isListType, setListType, unwrapListType } from "../editorUtils";
@@ -225,28 +226,6 @@ function ListValueInput({
     return () => window.removeEventListener("pointerdown", close, true);
   }, [onBlur, open]);
 
-  const updateItem = (index: number, nextValue: MasterValue) => {
-    onChange(items.map((item, itemIndex) => (itemIndex === index ? nextValue : item)));
-  };
-
-  const addItem = () => {
-    onChange([...items, defaultValueForType(elementType, documents, structDefinitions)]);
-    setOpen(true);
-  };
-
-  const removeItem = (index: number) => {
-    onChange(items.filter((_, itemIndex) => itemIndex !== index));
-  };
-
-  const moveItem = (index: number, delta: -1 | 1) => {
-    const nextIndex = index + delta;
-    if (nextIndex < 0 || nextIndex >= items.length) return;
-    const next = [...items];
-    const [item] = next.splice(index, 1);
-    next.splice(nextIndex, 0, item);
-    onChange(next);
-  };
-
   return (
     <div className={clsx("list-value-input", className)} ref={rootRef}>
       <button
@@ -260,7 +239,7 @@ function ListValueInput({
         onKeyDown={onKeyDown}
       >
         <span>{listSummary(items, elementType, placeholder, documents, structDefinitions)}</span>
-        <strong>{items.length}</strong>
+        <strong>({items.length})</strong>
       </button>
       {open && (
         <div
@@ -268,42 +247,159 @@ function ListValueInput({
           onKeyDown={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <div className="list-value-title">
-            <span>{elementType} list</span>
-            <button className="secondary-button compact" type="button" onClick={addItem}>
-              + Add
-            </button>
-          </div>
-          <div className="list-value-items">
-            {items.length === 0 && (
-              <div className="list-value-empty">Empty list</div>
-            )}
-            {items.map((item, index) => (
-              <div className="list-value-row" key={index}>
-                <div className="list-value-row-tools">
-                  <span>{index + 1}</span>
-                  <button disabled={index === 0} type="button" onClick={() => moveItem(index, -1)}>
-                    ↑
-                  </button>
-                  <button disabled={index === items.length - 1} type="button" onClick={() => moveItem(index, 1)}>
-                    ↓
-                  </button>
-                  <button className="danger-icon" type="button" onClick={() => removeItem(index)}>
-                    ×
-                  </button>
-                </div>
-                <ListItemValueEditor
-                  documents={documents}
-                  elementType={elementType}
-                  onChange={(nextValue) => updateItem(index, nextValue)}
-                  structDefinitions={structDefinitions}
-                  value={item}
-                />
-              </div>
-            ))}
-          </div>
+          <ListValueEditorPanel
+            documents={documents}
+            elementType={elementType}
+            onChange={onChange}
+            showToolbar={false}
+            structDefinitions={structDefinitions}
+            value={value}
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+export function ListValueEditorPanel({
+  className,
+  documents,
+  elementType,
+  onChange,
+  showToolbar = true,
+  structDefinitions,
+  value
+}: {
+  className?: string;
+  documents: Record<string, DefinitionDocument>;
+  elementType: string;
+  onChange: (value: MasterValue[]) => void;
+  showToolbar?: boolean;
+  structDefinitions: Record<string, StructDefinition>;
+  value: MasterValue | undefined;
+}) {
+  const [dragIndex, setDragIndex] = useState<number>();
+  const [dropGap, setDropGap] = useState<number>();
+  const dragIndexRef = useRef<number | undefined>(undefined);
+  const dropGapRef = useRef<number | undefined>(undefined);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const items = Array.isArray(value) ? value : [];
+
+  const updateItem = (index: number, nextValue: MasterValue) => {
+    onChange(items.map((item, itemIndex) => (itemIndex === index ? nextValue : item)));
+  };
+
+  const addItem = () => {
+    onChange([...items, defaultValueForType(elementType, documents, structDefinitions)]);
+  };
+
+  const removeItem = (index: number) => {
+    onChange(items.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const moveItemToGap = (index: number, gap: number) => {
+    let nextIndex = Math.max(0, Math.min(gap, items.length));
+    if (index < nextIndex) nextIndex -= 1;
+    if (nextIndex === index) return;
+    const next = [...items];
+    const [item] = next.splice(index, 1);
+    next.splice(nextIndex, 0, item);
+    onChange(next);
+  };
+
+  const startDrag = (event: React.PointerEvent<HTMLElement>, index: number) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragIndexRef.current = index;
+    dropGapRef.current = index;
+    setDragIndex(index);
+    setDropGap(index);
+  };
+
+  useEffect(() => {
+    if (dragIndex == null) return;
+    const updateGap = (clientY: number) => {
+      const rows = Array.from(panelRef.current?.querySelectorAll<HTMLElement>("[data-list-item-index]") ?? []);
+      let nextGap = items.length;
+      for (const row of rows) {
+        const index = Number(row.dataset.listItemIndex);
+        const rect = row.getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) {
+          nextGap = index;
+          break;
+        }
+      }
+      dropGapRef.current = nextGap;
+      setDropGap(nextGap);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      event.preventDefault();
+      updateGap(event.clientY);
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      event.preventDefault();
+      const sourceIndex = dragIndexRef.current;
+      const targetGap = dropGapRef.current;
+      if (sourceIndex != null && targetGap != null) moveItemToGap(sourceIndex, targetGap);
+      dragIndexRef.current = undefined;
+      dropGapRef.current = undefined;
+      setDragIndex(undefined);
+      setDropGap(undefined);
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", onPointerUp, { passive: false });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [dragIndex, items.length, moveItemToGap]);
+
+  return (
+    <div className={clsx("list-value-panel", !showToolbar && "without-toolbar", className)} ref={panelRef}>
+      {showToolbar && (
+        <div className="list-value-toolbar">
+          <span>{elementType}</span>
+          <strong>{items.length} items</strong>
+        </div>
+      )}
+      <div className="list-value-items">
+        {items.length === 0 && (
+          <div className="list-value-empty">Empty list</div>
+        )}
+        {items.map((item, index) => (
+          <div className="list-value-row-wrap" key={index}>
+            {dropGap === index && <div className="list-drop-marker" />}
+            <div
+              className={clsx("list-value-row", dragIndex === index && "dragging")}
+              data-list-item-index={index}
+            >
+              <span
+                className="list-drag-handle"
+                title="Drag to reorder"
+                onPointerDown={(event) => startDrag(event, index)}
+              >
+                <GripVertical size={15} />
+                <span>{index + 1}</span>
+              </span>
+              <ListItemValueEditor
+                documents={documents}
+                elementType={elementType}
+                onChange={(nextValue) => updateItem(index, nextValue)}
+                structDefinitions={structDefinitions}
+                value={item}
+              />
+              <button className="list-row-delete" title="Remove item" type="button" onClick={() => removeItem(index)}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          </div>
+        ))}
+        {dropGap === items.length && <div className="list-drop-marker" />}
+        <button className="list-add-row-button" type="button" onClick={addItem}>
+          <Plus size={14} />
+          Add
+        </button>
+      </div>
     </div>
   );
 }

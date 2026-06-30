@@ -22,7 +22,7 @@ import {
 } from "../editorUtils";
 import type { DefinitionDocument, FieldDefinition, MasterRefDefinition, MasterValue, RowDefinition, StructDefinition, TableDefinition } from "../types";
 import { EditorHeader } from "./EditorHost";
-import { BoolToggleInput, FieldTypeControl, MasterValueInput, enumInfoForType, type EnumInfo } from "./MasterValueEditor";
+import { BoolToggleInput, FieldTypeControl, ListValueEditorPanel, MasterValueInput, enumInfoForType, type EnumInfo } from "./MasterValueEditor";
 import { isValidTagName, TagTokenInput, uniqueTags } from "./TagTokenInput";
 
 const ROW_NUMBER_WIDTH = 64;
@@ -48,6 +48,12 @@ type SelectedFlagsCell = {
   fieldIndex: number;
   originalIndex: number;
   typeName: string;
+  visibleRowIndex: number;
+};
+type SelectedListCell = {
+  elementType: string;
+  fieldIndex: number;
+  originalIndex: number;
   visibleRowIndex: number;
 };
 type PopoverPosition = { left: number; top: number };
@@ -431,6 +437,7 @@ function RecordsGrid({
   const [activeCell, setActiveCell] = useState<ActiveCellState>();
   const [structCell, setStructCell] = useState<SelectedStructCell>();
   const [flagsCell, setFlagsCell] = useState<SelectedFlagsCell>();
+  const [listCell, setListCell] = useState<SelectedListCell>();
   const [popoverPosition, setPopoverPosition] = useState<PopoverPosition>();
   const structDefinitions = useMemo(() => structDefinitionMap(documents), [documents]);
   const availableTags = project?.availableTags ?? [];
@@ -520,6 +527,7 @@ function RecordsGrid({
       setSelectedRow(undefined);
       setStructCell(undefined);
       setFlagsCell(undefined);
+      setListCell(undefined);
     };
     window.addEventListener("pointerdown", clearSelection, true);
     return () => window.removeEventListener("pointerdown", clearSelection, true);
@@ -530,6 +538,7 @@ function RecordsGrid({
     setActiveCell(undefined);
     setStructCell(undefined);
     setFlagsCell(undefined);
+    setListCell(undefined);
   };
 
   const copyRowAt = (originalIndex: number) => {
@@ -572,7 +581,7 @@ function RecordsGrid({
   };
 
   const updatePopoverPosition = () => {
-    const popoverCell = structCell ?? flagsCell;
+    const popoverCell = structCell ?? flagsCell ?? listCell;
     if (!popoverCell) {
       setPopoverPosition(undefined);
       return;
@@ -589,13 +598,13 @@ function RecordsGrid({
     const targetRect = target.getBoundingClientRect();
     setPopoverPosition({
       left: targetRect.left - gridRect.left,
-      top: targetRect.top - gridRect.top
+      top: targetRect.bottom - gridRect.top
     });
   };
 
   useEffect(() => {
     updatePopoverPosition();
-    if ((!structCell && !flagsCell) || !scrollRef.current) return;
+    if ((!structCell && !flagsCell && !listCell) || !scrollRef.current) return;
     const onScroll = () => window.requestAnimationFrame(updatePopoverPosition);
     const onResize = () => window.requestAnimationFrame(updatePopoverPosition);
     const scrollElement = scrollRef.current;
@@ -605,21 +614,22 @@ function RecordsGrid({
       scrollElement.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
     };
-  }, [flagsCell, structCell, rows]);
+  }, [flagsCell, listCell, structCell, rows]);
 
   useEffect(() => {
-    if (!structCell && !flagsCell) return;
+    if (!structCell && !flagsCell && !listCell) return;
     const close = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setStructCell(undefined);
       setFlagsCell(undefined);
+      setListCell(undefined);
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [flagsCell, structCell]);
+  }, [flagsCell, listCell, structCell]);
 
   useEffect(() => {
-    const popoverCell = structCell ?? flagsCell;
+    const popoverCell = structCell ?? flagsCell ?? listCell;
     if (!popoverCell) return;
     const close = (event: PointerEvent) => {
       const target = event.target;
@@ -631,10 +641,11 @@ function RecordsGrid({
       if (activeCellElement?.contains(target) || activePopoverElement?.contains(target)) return;
       setStructCell(undefined);
       setFlagsCell(undefined);
+      setListCell(undefined);
     };
     window.addEventListener("pointerdown", close, true);
     return () => window.removeEventListener("pointerdown", close, true);
-  }, [flagsCell, structCell]);
+  }, [flagsCell, listCell, structCell]);
 
   const reorderColumn = (from: number, to: number) => {
     if (from < 0 || to < 0 || from === to) return;
@@ -861,23 +872,33 @@ function RecordsGrid({
     if (field === "tags") {
       setStructCell(undefined);
       setFlagsCell(undefined);
+      setListCell(undefined);
       return;
     }
     const entry = rows[visibleRowIndex];
     const fieldDefinition = table.fields[field];
+    if (entry && fieldDefinition && isListType(fieldDefinition.type)) {
+      setListCell({ elementType: unwrapListType(fieldDefinition.type), fieldIndex: field, originalIndex: entry.originalIndex, visibleRowIndex });
+      setStructCell(undefined);
+      setFlagsCell(undefined);
+      return;
+    }
     if (entry && fieldDefinition && structDefinitions[fieldDefinition.type]) {
       setStructCell({ fieldIndex: field, originalIndex: entry.originalIndex, typeName: fieldDefinition.type, visibleRowIndex });
       setFlagsCell(undefined);
+      setListCell(undefined);
       return;
     }
     const enumInfo = fieldDefinition ? enumInfoForType(documents, fieldDefinition.type) : undefined;
     if (entry && fieldDefinition && enumInfo?.flags) {
       setFlagsCell({ fieldIndex: field, originalIndex: entry.originalIndex, typeName: fieldDefinition.type, visibleRowIndex });
       setStructCell(undefined);
+      setListCell(undefined);
       return;
     }
     setStructCell(undefined);
     setFlagsCell(undefined);
+    setListCell(undefined);
   };
 
   const focusGridCell = (visibleRowIndex: number, field: GridField, edit = false) => {
@@ -900,6 +921,55 @@ function RecordsGrid({
 
   const beginEditingCell = (visibleRowIndex: number, field: GridField) => {
     focusGridCell(visibleRowIndex, field, true);
+  };
+
+  const usesPopoverEditorField = (field: GridField) => {
+    if (field === "tags") return false;
+    const fieldDefinition = table.fields[field];
+    if (!fieldDefinition) return false;
+    return isListType(fieldDefinition.type)
+      || Boolean(structDefinitions[fieldDefinition.type])
+      || Boolean(enumInfoForType(documents, fieldDefinition.type)?.flags);
+  };
+
+  const clearGridCell = (visibleRowIndex: number, field: GridField) => {
+    const entry = rows[visibleRowIndex];
+    if (!entry) return;
+    updateDocument(document.relativePath, "Clear cell", (draft) => {
+      if (draft.definition.kind !== "table") return;
+      const targetRow = draft.definition.rows[entry.originalIndex];
+      if (!targetRow) return;
+      if (field === "tags") {
+        targetRow.meta = undefined;
+        return;
+      }
+      const fieldDefinition = draft.definition.fields[field];
+      if (!fieldDefinition) return;
+      delete targetRow.data[fieldDefinition.name];
+    });
+  };
+
+  const copyGridCellText = (visibleRowIndex: number, field: GridField) => {
+    const entry = rows[visibleRowIndex];
+    if (!entry) return;
+    const text = gridCellDisplayText(entry.row, field);
+    void navigator.clipboard?.writeText(text);
+  };
+
+  const gridCellDisplayText = (row: RowDefinition, field: GridField) => {
+    if (field === "tags") {
+      const tags = row.meta?.tags ?? [];
+      return tags.length > 0 ? tags.join(", ") : "untagged";
+    }
+    const fieldDefinition = table.fields[field];
+    if (!fieldDefinition) return "";
+    const value = row.data[fieldDefinition.name];
+    const empty = isEmptyCellValue(value);
+    const baseText = empty
+      ? defaultPlaceholderForType(fieldDefinition.type, documents, structDefinitions)
+      : formatCellDisplayValue(fieldDefinition, value, documents, structDefinitions);
+    if (!isListType(fieldDefinition.type)) return baseText;
+    return `${baseText} (${listItemCount(value)})`;
   };
 
   const focusRelativeGridInput = (visibleRowIndex: number, field: GridField, rowDelta: number, columnDelta: number) => {
@@ -932,6 +1002,17 @@ function RecordsGrid({
 
   const handleSelectedCellKeyDown = (event: React.KeyboardEvent<HTMLElement>, visibleRowIndex: number, field: GridField) => {
     const key = event.key;
+    const command = event.metaKey || event.ctrlKey;
+    if (command && key.toLowerCase() === "c") {
+      event.preventDefault();
+      copyGridCellText(visibleRowIndex, field);
+      return;
+    }
+    if (key === "Delete" || key === "Backspace") {
+      event.preventDefault();
+      clearGridCell(visibleRowIndex, field);
+      return;
+    }
     if (key === "Tab") {
       event.preventDefault();
       focusRelativeGridInput(visibleRowIndex, field, 0, event.shiftKey ? -1 : 1);
@@ -940,12 +1021,14 @@ function RecordsGrid({
     if (key === "Enter") {
       event.preventDefault();
       if (event.shiftKey) focusRelativeGridInput(visibleRowIndex, field, -1, 0);
+      else if (usesPopoverEditorField(field)) focusGridCell(visibleRowIndex, field);
       else beginEditingCell(visibleRowIndex, field);
       return;
     }
     if (key === "F2") {
       event.preventDefault();
-      beginEditingCell(visibleRowIndex, field);
+      if (usesPopoverEditorField(field)) focusGridCell(visibleRowIndex, field);
+      else beginEditingCell(visibleRowIndex, field);
       return;
     }
     if (key === "ArrowUp") {
@@ -1009,6 +1092,8 @@ function RecordsGrid({
 
   const flagsField = flagsCell ? table.fields[flagsCell.fieldIndex] : undefined;
   const flagsValue = flagsCell && flagsField ? formatValue(table.rows[flagsCell.originalIndex]?.data[flagsField.name]) : "";
+  const listField = listCell ? table.fields[listCell.fieldIndex] : undefined;
+  const listValue = listCell && listField ? table.rows[listCell.originalIndex]?.data[listField.name] : undefined;
 
   return (
     <section className="records-panel">
@@ -1160,7 +1245,7 @@ function RecordsGrid({
                         deleteRow(document.relativePath, entry.originalIndex);
                       }}
                     >
-                      x
+                      <Trash2 size={13} />
                     </button>
                   </div>
                   <div
@@ -1174,6 +1259,7 @@ function RecordsGrid({
                       setActiveGridCell(virtualRow.index, "tags", isTagEditing ? "edit" : "select");
                       setStructCell(undefined);
                       setFlagsCell(undefined);
+                      setListCell(undefined);
                     }}
                     onKeyDown={(event) => handleSelectedCellKeyDown(event, virtualRow.index, "tags")}
                     onMouseDown={(event) => {
@@ -1193,6 +1279,7 @@ function RecordsGrid({
                         onFocus={() => {
                           setStructCell(undefined);
                           setFlagsCell(undefined);
+                          setListCell(undefined);
                         }}
                         onChange={(tags) =>
                           updateDocument(document.relativePath, "Edit row tags", (draft) => {
@@ -1228,8 +1315,10 @@ function RecordsGrid({
                     const isEditing = isSelected && activeCell?.mode === "edit";
                     const enumInfo = enumInfoForType(documents, field.type);
                     const isFlagsEnum = Boolean(enumInfo?.flags);
+                    const isListField = isListType(field.type);
                     const fieldIssues = cellIssues[fieldIndex];
                     const structDefinition = structDefinitions[field.type];
+                    const usesPopoverEditor = isFlagsEnum || isListField || Boolean(structDefinition);
                     const placeholder = defaultPlaceholderForType(field.type, documents, structDefinitions);
                     const displayValue = formatCellDisplayValue(field, row.data[field.name], documents, structDefinitions);
                     return (
@@ -1248,14 +1337,14 @@ function RecordsGrid({
                         data-grid-cell-row={virtualRow.index}
                         tabIndex={0}
                         title={fieldIssues.length > 0 ? fieldIssues.join("\n") : undefined}
-                        onDoubleClick={() => (isFlagsEnum ? focusGridCell(virtualRow.index, fieldIndex) : beginEditingCell(virtualRow.index, fieldIndex))}
+                        onDoubleClick={() => (usesPopoverEditor ? focusGridCell(virtualRow.index, fieldIndex) : beginEditingCell(virtualRow.index, fieldIndex))}
                         onFocus={() => setActiveGridCell(virtualRow.index, fieldIndex, isEditing ? "edit" : "select")}
                         onKeyDown={(event) => handleSelectedCellKeyDown(event, virtualRow.index, fieldIndex)}
                         onMouseDown={(event) => {
                           if (event.target === event.currentTarget) focusGridCell(virtualRow.index, fieldIndex);
                         }}
                       >
-                        {isEditing && !isFlagsEnum ? (
+                        {isEditing && !usesPopoverEditor ? (
                           <MasterValueInput
                             dataGridField={fieldIndex}
                             dataGridRow={virtualRow.index}
@@ -1287,18 +1376,25 @@ function RecordsGrid({
                           />
                         ) : (
                           <button
-                            className="grid-cell-display"
+                            className={clsx("grid-cell-display", isListField && "list-cell-display")}
                             type="button"
                             onMouseDown={(event) => {
                               event.preventDefault();
-                              if (isFlagsEnum) focusGridCell(virtualRow.index, fieldIndex);
+                              if (usesPopoverEditor) focusGridCell(virtualRow.index, fieldIndex);
                               else beginEditingCell(virtualRow.index, fieldIndex);
                             }}
                           >
-                            {isEmptyCellValue(row.data[field.name]) ? (
-                              <span className="cell-placeholder">{placeholder}</span>
-                            ) : (
-                              <span>{structDefinition ? displayValue : formatValue(row.data[field.name])}</span>
+                            <span className={clsx(isEmptyCellValue(row.data[field.name]) && "cell-placeholder")}>
+                              {isEmptyCellValue(row.data[field.name])
+                                ? placeholder
+                                : usesPopoverEditor
+                                  ? displayValue
+                                  : formatValue(row.data[field.name])}
+                            </span>
+                            {isListField && (
+                              <span className="list-cell-count">
+                                ({listItemCount(row.data[field.name])})
+                              </span>
                             )}
                           </button>
                         )}
@@ -1323,12 +1419,22 @@ function RecordsGrid({
             <StructCellPopover
               document={document}
               field={table.fields[structCell.fieldIndex]}
-              onClose={() => setStructCell(undefined)}
               position={popoverPosition}
               row={table.rows[structCell.originalIndex]}
               rowIndex={structCell.originalIndex}
               structDefinition={structDefinitions[structCell.typeName]}
               structDefinitions={structDefinitions}
+            />
+          )}
+          {listCell && listField && popoverPosition && (
+            <ListCellPopover
+              documents={documents}
+              elementType={listCell.elementType}
+              field={listField}
+              onChange={(value) => updateCell(document.relativePath, listCell.originalIndex, listField.name, value)}
+              position={popoverPosition}
+              structDefinitions={structDefinitions}
+              value={listValue}
             />
           )}
           {flagsCell && popoverPosition && (
@@ -1339,7 +1445,6 @@ function RecordsGrid({
                 if (!flagsField) return;
                 updateCell(document.relativePath, flagsCell.originalIndex, flagsField.name, value);
               }}
-              onClose={() => setFlagsCell(undefined)}
               position={popoverPosition}
               value={flagsValue}
             />
@@ -1443,18 +1548,53 @@ function enumValueParts(value: string) {
     .filter(Boolean);
 }
 
+function ListCellPopover({
+  documents,
+  elementType,
+  field,
+  onChange,
+  position,
+  structDefinitions,
+  value
+}: {
+  documents: Record<string, DefinitionDocument>;
+  elementType: string;
+  field: FieldDefinition;
+  onChange: (value: MasterValue[]) => void;
+  position: PopoverPosition;
+  structDefinitions: Record<string, StructDefinition>;
+  value: MasterValue | undefined;
+}) {
+  return (
+    <div
+      className="list-value-popover list-cell-popover"
+      data-cell-popover="true"
+      style={{ left: position.left, top: position.top }}
+      title={field.name}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <ListValueEditorPanel
+        documents={documents}
+        elementType={elementType}
+        onChange={onChange}
+        showToolbar={false}
+        structDefinitions={structDefinitions}
+        value={value}
+      />
+    </div>
+  );
+}
+
 function FlagsEnumCellPopover({
   enumInfo,
   field,
   onChange,
-  onClose,
   position,
   value
 }: {
   enumInfo?: EnumInfo;
   field?: FieldDefinition;
   onChange: (value: string) => void;
-  onClose: () => void;
   position: PopoverPosition;
   value: string;
 }) {
@@ -1483,13 +1623,6 @@ function FlagsEnumCellPopover({
       style={{ left: position.left, top: position.top }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="struct-cell-title">
-        <strong>{field.name}</strong>
-        <span>Flags</span>
-        <button className="icon-button" title="Close" onClick={onClose}>
-          ×
-        </button>
-      </div>
       <div className="flags-cell-options">
         <button type="button" onClick={chooseZero}>
           <input readOnly checked={zeroSelected} type="checkbox" />
@@ -1509,7 +1642,6 @@ function FlagsEnumCellPopover({
 function StructCellPopover({
   document,
   field,
-  onClose,
   position,
   row,
   rowIndex,
@@ -1518,7 +1650,6 @@ function StructCellPopover({
 }: {
   document: DefinitionDocument;
   field?: FieldDefinition;
-  onClose: () => void;
   position: PopoverPosition;
   row?: RowDefinition;
   rowIndex: number;
@@ -1558,13 +1689,6 @@ function StructCellPopover({
       style={{ left: position.left, top: position.top }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="struct-cell-title">
-        <strong>{field.name}</strong>
-        <span>{structDefinition.name}</span>
-        <button className="icon-button" title="Close" onClick={onClose}>
-          ×
-        </button>
-      </div>
       <div className="struct-cell-fields">
         {structDefinition.fields.map((structField) => {
           const hasValue = Object.prototype.hasOwnProperty.call(currentValue, structField.name);
@@ -1681,6 +1805,10 @@ function defaultPlaceholderForType(
 
 function isEmptyCellValue(value: MasterValue | undefined) {
   return value == null || value === "";
+}
+
+function listItemCount(value: MasterValue | undefined) {
+  return Array.isArray(value) ? value.length : 0;
 }
 
 function isEditableElement(target: EventTarget | null) {

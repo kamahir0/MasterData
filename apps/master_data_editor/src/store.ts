@@ -74,6 +74,8 @@ interface EditorState {
   loadPreferences: () => Promise<void>;
   openProject: (path: string) => Promise<void>;
   createProject: (path: string) => Promise<void>;
+  closeProject: () => void;
+  removeRecentProject: (path: string) => void;
   reloadProject: (activePath?: string) => Promise<void>;
   setActivePath: (path: string) => void;
   setActiveView: (view: ActiveView) => void;
@@ -217,6 +219,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     } finally {
       set({ isBusy: false });
     }
+  },
+  closeProject() {
+    set({
+      project: undefined,
+      projectSettingsDraft: undefined,
+      projectSettingsDirty: false,
+      documents: {},
+      diagnostics: [],
+      activeView: "document",
+      activePath: undefined,
+      dirty: {},
+      undoStacks: {},
+      redoStacks: {},
+      projectUndoStack: [],
+      projectRedoStack: [],
+      tagFilter: defaultTagFilter,
+      profilePreview: undefined,
+      buildLog: []
+    });
+  },
+  removeRecentProject(path) {
+    set((state) => ({
+      recentProjects: state.recentProjects.filter((item) => item !== path),
+      projectPathInput: state.projectPathInput === path ? "" : state.projectPathInput
+    }));
+    void persistPreferences();
   },
   async reloadProject(activePath) {
     const project = get().project;

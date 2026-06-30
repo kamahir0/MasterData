@@ -15,6 +15,7 @@ import {
   Settings,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   Undo2,
   ZoomIn,
   ZoomOut
@@ -42,6 +43,7 @@ export function AppShell() {
     bottomPanelVisible,
     build,
     clean,
+    closeProject,
     createProject,
     dirty,
     error,
@@ -54,6 +56,7 @@ export function AppShell() {
     projectSettingsDirty,
     redo,
     recentProjects,
+    removeRecentProject,
     saveActive,
     setBottomPanelVisible,
     setActiveView,
@@ -105,6 +108,26 @@ export function AppShell() {
     }
   }, [createProject]);
 
+  const confirmDiscardUnsavedChanges = useCallback(async () => {
+    if (!hasUnsavedChanges) return true;
+    if ("__TAURI_INTERNALS__" in window) {
+      return ask("Discard unsaved changes?", {
+        title: "Unsaved Changes",
+        kind: "warning",
+        okLabel: "Discard",
+        cancelLabel: "Cancel"
+      });
+    }
+    return window.confirm("Discard unsaved changes?");
+  }, [hasUnsavedChanges]);
+
+  const closeCurrentProject = useCallback(async () => {
+    if (!project) return;
+    const discard = await confirmDiscardUnsavedChanges();
+    if (!discard) return;
+    closeProject();
+  }, [closeProject, confirmDiscardUnsavedChanges, project]);
+
   const requestApplicationExit = useCallback(async () => {
     allowCloseRef.current = true;
     if ("__TAURI_INTERNALS__" in window) {
@@ -140,6 +163,7 @@ export function AppShell() {
     if (!("__TAURI_INTERNALS__" in window)) return;
     let unlistenOpen: (() => void) | undefined;
     let unlistenNew: (() => void) | undefined;
+    let unlistenClose: (() => void) | undefined;
     void listen("menu-new-project", () => {
       void chooseNewProjectDirectory();
     }).then((dispose) => {
@@ -150,11 +174,17 @@ export function AppShell() {
     }).then((dispose) => {
       unlistenOpen = dispose;
     });
+    void listen("menu-close-project", () => {
+      void closeCurrentProject();
+    }).then((dispose) => {
+      unlistenClose = dispose;
+    });
     return () => {
       unlistenOpen?.();
       unlistenNew?.();
+      unlistenClose?.();
     };
-  }, [chooseNewProjectDirectory, chooseProjectSettingsFile]);
+  }, [chooseNewProjectDirectory, chooseProjectSettingsFile, closeCurrentProject]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -306,6 +336,7 @@ export function AppShell() {
               onNewProject={chooseNewProjectDirectory}
               onOpenProject={chooseProjectSettingsFile}
               onOpenRecent={(path) => void openProject(path)}
+              onRemoveRecent={removeRecentProject}
               recentProjects={recentProjects}
             />
           )}
@@ -343,12 +374,14 @@ function WelcomePage({
   onNewProject,
   onOpenProject,
   onOpenRecent,
+  onRemoveRecent,
   recentProjects
 }: {
   isBusy: boolean;
   onNewProject: () => Promise<void>;
   onOpenProject: () => Promise<void>;
   onOpenRecent: (path: string) => void;
+  onRemoveRecent: (path: string) => void;
   recentProjects: string[];
 }) {
   return (
@@ -375,10 +408,19 @@ function WelcomePage({
         </div>
         {recentProjects.length === 0 && <p className="muted">No recent projects.</p>}
         {recentProjects.map((path) => (
-          <button className="recent-project" key={path} onClick={() => onOpenRecent(path)} title={path}>
-            <FolderOpen size={15} />
-            <span>{path}</span>
-          </button>
+          <div className="recent-project-row" key={path}>
+            <button className="recent-project" onClick={() => onOpenRecent(path)} title={path}>
+              <FolderOpen size={15} />
+              <span>{path}</span>
+            </button>
+            <button
+              className="icon-button recent-remove-button"
+              title="Remove from recent projects"
+              onClick={() => onRemoveRecent(path)}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
         ))}
       </div>
     </div>
