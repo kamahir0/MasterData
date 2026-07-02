@@ -1,9 +1,9 @@
 import clsx from "clsx";
-import { GripVertical, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, GripVertical, Plus, Trash2 } from "lucide-react";
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { coerceValue } from "../store";
-import { availableTypeOptionGroups, isListType, setListType, unwrapListType } from "../editorUtils";
+import { availableTypeOptionGroups, formatTypeLabel, isListType, setListType, unwrapListType } from "../editorUtils";
 import type { DefinitionDocument, MasterValue, StructDefinition } from "../types";
 
 type ValuePopoverScopeValue = {
@@ -59,30 +59,20 @@ export function FieldTypeControl({
           <optgroup key={group.label} label={group.label}>
             {group.options.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {formatTypeLabel(option)}
               </option>
             ))}
           </optgroup>
         ))}
       </select>
-      <div className="field-cardinality-control" role="group" aria-label="Value cardinality">
-        <button
-          aria-pressed={!list}
-          aria-label="Use a single value"
-          className={clsx("field-cardinality-option", !list && "checked")}
-          title="Use a single value"
-          type="button"
-          onClick={() => onChange(setListType(type, false))}
-        >
-          1
-        </button>
+      <div className="field-cardinality-control">
         <button
           aria-pressed={list}
-          aria-label="Use a list of values"
+          aria-label={list ? "Use a single value" : "Use a list of values"}
           className={clsx("field-cardinality-option", list && "checked")}
-          title="Use a list of values"
+          title={list ? "Use a single value" : "Use a list of values"}
           type="button"
-          onClick={() => onChange(setListType(type, true))}
+          onClick={() => onChange(setListType(type, !list))}
         >
           []
         </button>
@@ -499,7 +489,7 @@ export function ListValueEditorPanel({
     <div className={clsx("list-value-panel", !showToolbar && "without-toolbar", className)} ref={panelRef}>
       {showToolbar && (
         <div className="list-value-toolbar">
-          <span>{elementType}</span>
+          <span>{formatTypeLabel(elementType)}</span>
           <strong>{items.length} items</strong>
         </div>
       )}
@@ -647,6 +637,8 @@ function EnumValueInput({
   value: string;
 }) {
   const [focused, setFocused] = useState(false);
+  const [showAllCandidates, setShowAllCandidates] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   if (enumInfo.flags) {
     const zero = enumInfo.defaultMemberName ?? placeholder;
     const parts = enumValueParts(value);
@@ -713,17 +705,21 @@ function EnumValueInput({
   }
 
   const query = value.trim();
-  const candidates = enumInfo.members.filter((option) => !query || option.toLowerCase().includes(query.toLowerCase()));
+  const candidates = enumInfo.members.filter(
+    (option) => showAllCandidates || !query || option.toLowerCase().includes(query.toLowerCase())
+  );
   const showCandidates = focused && candidates.length > 0;
 
   const choose = (option: string) => {
     onChange(option);
+    setShowAllCandidates(false);
     setFocused(false);
   };
 
   return (
-    <div className={clsx("enum-cell-input", className)}>
+    <div className={clsx("enum-cell-input", "enum-select-input", className)}>
       <input
+        ref={inputRef}
         className="grid-cell-input"
         data-grid-field={dataGridField}
         data-grid-row={dataGridRow}
@@ -731,9 +727,15 @@ function EnumValueInput({
         value={value}
         onBlur={() => {
           onBlur?.();
-          window.setTimeout(() => setFocused(false), 120);
+          window.setTimeout(() => {
+            setFocused(false);
+            setShowAllCandidates(false);
+          }, 120);
         }}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          setShowAllCandidates(false);
+          onChange(event.target.value);
+        }}
         onFocus={() => {
           setFocused(true);
           onFocus?.();
@@ -744,6 +746,19 @@ function EnumValueInput({
           if (event.key === "ArrowDown" || event.key === "ArrowUp") setFocused(true);
         }}
       />
+      <button
+        aria-label="Show enum values"
+        className="enum-dropdown-button"
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => {
+          inputRef.current?.focus();
+          setShowAllCandidates(true);
+          setFocused(true);
+        }}
+      >
+        <ChevronDown size={13} />
+      </button>
       {showCandidates && (
         <div className="enum-cell-menu">
           {candidates.map((candidate) => (

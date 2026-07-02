@@ -25,6 +25,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../api";
 import { useEditorStore } from "../store";
 import type { DirectoryNode, EditorDiagnostic, FileNode } from "../types";
 import { basename, capitalize, dirname, joinPath, shortPath } from "../editorUtils";
@@ -38,7 +39,7 @@ type InlineEditState =
   | { mode: "create"; kind: CreateKind; directory: string; name: string }
   | { mode: "rename"; target: EntryKind; path: string; name: string };
 type MasterCreateEvent = { kind: CreateKind; directory: string };
-type MasterEntryEvent = { action: "rename" | "delete"; kind: EntryKind; path: string };
+type MasterEntryEvent = { action: "copy_path" | "delete" | "rename" | "reveal"; kind: EntryKind; path: string };
 
 type TreeNode = DirectoryTreeNode | FileTreeNode;
 
@@ -122,6 +123,25 @@ export function FileExplorer() {
     });
   }, []);
 
+  const copyEntryPath = useCallback(async (path: string) => {
+    if (!project) return;
+    try {
+      const absolutePath = await api.resolveMasterEntryPath(project.root, path);
+      await navigator.clipboard?.writeText(absolutePath);
+    } catch (error) {
+      console.error("Failed to copy path", error);
+    }
+  }, [project]);
+
+  const revealEntry = useCallback(async (path: string) => {
+    if (!project) return;
+    try {
+      await api.revealMasterEntry(project.root, path);
+    } catch (error) {
+      console.error("Failed to reveal entry", error);
+    }
+  }, [project]);
+
   const createFolder = () => beginCreate("folder", createMenu?.directory ?? "");
 
   const createFile = (kind: "table" | "enum" | "struct") => beginCreate(kind, createMenu?.directory ?? "");
@@ -188,6 +208,14 @@ export function FileExplorer() {
     let unlisten: (() => void) | undefined;
     void listen<MasterEntryEvent>("master-entry-action", (event) => {
       const { action, kind, path } = event.payload;
+      if (action === "copy_path") {
+        void copyEntryPath(path);
+        return;
+      }
+      if (action === "reveal") {
+        void revealEntry(path);
+        return;
+      }
       if (action === "rename") {
         beginRename(kind, path);
         return;
@@ -197,7 +225,7 @@ export function FileExplorer() {
       unlisten = dispose;
     });
     return () => unlisten?.();
-  }, [beginRename, deleteEntry]);
+  }, [beginRename, copyEntryPath, deleteEntry, revealEntry]);
 
   const toggleDirectory = (path: string) => {
     setCollapsedDirectories((current) => {

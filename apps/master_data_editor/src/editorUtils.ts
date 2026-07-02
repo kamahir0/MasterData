@@ -40,17 +40,23 @@ export function availableTypeOptionGroups(documents: Record<string, DefinitionDo
 }
 
 export function isListType(type: string) {
-  return /^list<.+>$/.test(type.trim());
+  return /^.+\[\]$/.test(type.trim());
 }
 
 export function unwrapListType(type: string) {
   const trimmed = type.trim();
-  return isListType(trimmed) ? trimmed.slice("list<".length, -1).trim() : trimmed;
+  return isListType(trimmed) ? trimmed.slice(0, -"[]".length).trim() : trimmed;
 }
 
 export function setListType(type: string, list: boolean) {
   const base = unwrapListType(type);
-  return list ? `list<${base}>` : base;
+  return list ? `${base}[]` : base;
+}
+
+export function formatTypeLabel(type: string): string {
+  const trimmed = type.trim();
+  if (!isListType(trimmed)) return trimmed;
+  return `${formatTypeLabel(unwrapListType(trimmed))}[]`;
 }
 
 export function messagePackKey(field: FieldDefinition, fallbackIndex: number) {

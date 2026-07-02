@@ -197,7 +197,7 @@ Each YAML file defines exactly one item:
 - `kind: table`
 
 Supported scalar types are `bool`, `int`, `long`, `float`, `double`, and
-`string`. `list<T>` is generated as
+`string`. `T[]` is generated as
 `System.Collections.Immutable.ImmutableArray<T>`.
 
 ## Table Definitions

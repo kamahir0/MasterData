@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Emitter, LogicalPosition, Window};
 
@@ -29,6 +31,9 @@ const EVENT_MASTER_ENTRY_ACTION: &str = "master-entry-action";
 const EVENT_TABLE_CREATE_ENTRY: &str = "table-create-entry";
 const EVENT_TABLE_COLUMN_ACTION: &str = "table-column-action";
 const EVENT_TABLE_RECORD_ACTION: &str = "table-record-action";
+const EVENT_APP_EXIT_REQUESTED: &str = "app-exit-requested";
+
+static ALLOW_APP_EXIT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,6 +179,7 @@ struct CommandResult {
 
 #[tauri::command]
 fn request_app_exit(app: AppHandle) {
+    ALLOW_APP_EXIT.store(true, Ordering::SeqCst);
     app.exit(0);
 }
 
@@ -274,6 +280,22 @@ fn popup_master_entry_menu(
         None::<&str>,
     )
     .map_err(to_string)?;
+    let copy_path = MenuItem::with_id(
+        &window,
+        format!("{MENU_MASTER_ENTRY_PREFIX}copy_path:{kind}:{path}"),
+        "Copy Path",
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
+    let reveal = MenuItem::with_id(
+        &window,
+        format!("{MENU_MASTER_ENTRY_PREFIX}reveal:{kind}:{path}"),
+        reveal_menu_label(),
+        true,
+        None::<&str>,
+    )
+    .map_err(to_string)?;
     if kind == "directory" {
         let new_folder = MenuItem::with_id(
             &window,
@@ -325,6 +347,7 @@ fn popup_master_entry_menu(
         .map_err(to_string)?;
         let separator1 = PredefinedMenuItem::separator(&window).map_err(to_string)?;
         let separator2 = PredefinedMenuItem::separator(&window).map_err(to_string)?;
+        let separator3 = PredefinedMenuItem::separator(&window).map_err(to_string)?;
         let menu = Menu::with_items(
             &window,
             &[
@@ -336,6 +359,9 @@ fn popup_master_entry_menu(
                 &enum_file,
                 &struct_file,
                 &separator2,
+                &copy_path,
+                &reveal,
+                &separator3,
                 &rename,
                 &delete,
             ],
@@ -346,7 +372,12 @@ fn popup_master_entry_menu(
             .map_err(to_string);
     }
 
-    let menu = Menu::with_items(&window, &[&rename, &delete]).map_err(to_string)?;
+    let separator = PredefinedMenuItem::separator(&window).map_err(to_string)?;
+    let menu = Menu::with_items(
+        &window,
+        &[&copy_path, &reveal, &separator, &rename, &delete],
+    )
+    .map_err(to_string)?;
     menu.popup_at(window, LogicalPosition::new(x, y))
         .map_err(to_string)
 }
@@ -699,6 +730,21 @@ fn delete_entry(project_root: String, relative_path: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn resolve_master_entry_path(
+    project_root: String,
+    relative_path: String,
+) -> Result<String, String> {
+    let path = resolve_master_entry(&project_root, &relative_path).map_err(to_string)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn reveal_master_entry(project_root: String, relative_path: String) -> Result<(), String> {
+    let path = resolve_master_entry(&project_root, &relative_path).map_err(to_string)?;
+    reveal_path(&path).map_err(to_string)
+}
+
+#[tauri::command]
 fn read_sidecar(project_root: String, relative_path: String) -> Result<TableViewConfig, String> {
     let path = resolve_master_file(&project_root, &relative_path).map_err(to_string)?;
     read_sidecar_path(&path).map_err(to_string)
@@ -882,13 +928,24 @@ pub fn run() {
             rename_entry,
             move_entry,
             delete_entry,
+            resolve_master_entry_path,
+            reveal_master_entry,
             read_sidecar,
             write_sidecar,
             get_preferences,
             save_preferences,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run Lilja.MasterData editor");
+        .build(tauri::generate_context!())
+        .expect("failed to build Lilja.MasterData editor")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if ALLOW_APP_EXIT.swap(false, Ordering::SeqCst) {
+                    return;
+                }
+                api.prevent_exit();
+                let _ = app.emit(EVENT_APP_EXIT_REQUESTED, ());
+            }
+        });
 }
 
 fn load_project_snapshot(root: PathBuf) -> Result<ProjectSnapshot> {
@@ -1100,6 +1157,18 @@ fn resolve_master_file(project_root: &str, relative_path: &str) -> Result<PathBu
     Ok(path)
 }
 
+fn resolve_master_entry(project_root: &str, relative_path: &str) -> Result<PathBuf> {
+    let root = canonicalize_existing(PathBuf::from(project_root))?;
+    let config = MasterDataConfig::load(&root)?;
+    let master_root = canonicalize_existing(root.join(&config.master.input))?;
+    let path = safe_join(&master_root, relative_path)?;
+    ensure_inside(&master_root, &path)?;
+    if !path.exists() {
+        anyhow::bail!("path does not exist: {}", path.display());
+    }
+    Ok(path)
+}
+
 fn resolve_master_paths(
     project_root: &str,
     from: &str,
@@ -1156,6 +1225,46 @@ fn sidecar_path(path: &Path) -> PathBuf {
         .and_then(|value| value.to_str())
         .unwrap_or("table");
     path.with_file_name(format!("{stem}.config.json"))
+}
+
+fn reveal_menu_label() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Reveal in Finder"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "Reveal in Explorer"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "Reveal in File Manager"
+    }
+}
+
+fn reveal_path(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").arg("-R").arg(path).status()?;
+
+    #[cfg(target_os = "windows")]
+    let status = Command::new("explorer")
+        .arg(format!("/select,{}", path.display()))
+        .status()?;
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let status = {
+        let target = if path.is_dir() {
+            path
+        } else {
+            path.parent().unwrap_or(path)
+        };
+        Command::new("xdg-open").arg(target).status()?
+    };
+
+    if !status.success() {
+        anyhow::bail!("failed to reveal path: {}", path.display());
+    }
+    Ok(())
 }
 
 fn read_sidecar_path(path: &Path) -> Result<TableViewConfig> {

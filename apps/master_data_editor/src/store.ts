@@ -1,6 +1,7 @@
 import { enablePatches, applyPatches, produceWithPatches, type Patch } from "immer";
 import { create } from "zustand";
 import { api } from "./api";
+import { isListType } from "./editorUtils";
 import type {
   CommandResult,
   Definition,
@@ -827,7 +828,7 @@ function cloneDefinition(definition: Definition): Definition {
 function defaultValueForType(type: string): MasterValue {
   if (type === "bool") return false;
   if (type === "int" || type === "long" || type === "float" || type === "double") return 0;
-  if (type.startsWith("list<")) return [];
+  if (isListType(type)) return [];
   return "";
 }
 
@@ -841,7 +842,7 @@ export function coerceValue(type: string, raw: string): MasterValue {
     const parsed = Number.parseFloat(raw);
     return Number.isFinite(parsed) ? parsed : raw;
   }
-  if (type.startsWith("list<")) {
+  if (isListType(type)) {
     return raw
       .split(",")
       .map((value) => value.trim())

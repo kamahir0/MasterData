@@ -190,11 +190,8 @@ pub fn resolve_type(
     enum_names: &IndexSet<String>,
     struct_names: &IndexSet<String>,
 ) -> ResolvedType {
-    if let Some(inner) = type_name
-        .strip_prefix("list<")
-        .and_then(|value| value.strip_suffix('>'))
-    {
-        if inner.starts_with("list<") {
+    if let Some(inner) = type_name.trim().strip_suffix("[]") {
+        if inner.ends_with("[]") {
             return ResolvedType::Unknown(type_name.to_string());
         }
         return ResolvedType::List(Box::new(resolve_type(inner, enum_names, struct_names)));
@@ -208,6 +205,10 @@ pub fn resolve_type(
         _ if struct_names.contains(type_name) => ResolvedType::Struct(type_name.to_string()),
         _ => ResolvedType::Unknown(type_name.to_string()),
     }
+}
+
+fn is_array_type_name(type_name: &str) -> bool {
+    type_name.trim().ends_with("[]")
 }
 
 fn validate_enum(
@@ -531,7 +532,7 @@ fn validate_rows_structure(
         };
 
         for field in &table.fields {
-            if !data.contains_key(&field.name) && !field.type_name.starts_with("list<") {
+            if !data.contains_key(&field.name) && !is_array_type_name(&field.type_name) {
                 bag.push(
                     Diagnostic::error(
                         "LMD0401",
@@ -709,6 +710,12 @@ fn validate_ref_definitions(
             );
             continue;
         };
+        if target_table.type_name == table.type_name {
+            bag.push(
+                Diagnostic::error("LMD0910", "self MasterRef is not allowed")
+                    .at(&source.source.path),
+            );
+        }
 
         let Some((target_fields, unique)) = select_target_key(reference, target_table) else {
             bag.push(
@@ -990,7 +997,7 @@ fn validate_value(
             if let Some(fields) = struct_fields.get(name) {
                 for field in fields {
                     let key = Value::String(field.name.clone());
-                    if !map.contains_key(&key) && !field.type_name.starts_with("list<") {
+                    if !map.contains_key(&key) && !is_array_type_name(&field.type_name) {
                         bag.push(
                             Diagnostic::error(
                                 "LMD0407",

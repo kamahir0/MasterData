@@ -1,5 +1,5 @@
 import { AlertCircle, ChevronDown, ChevronRight, GripVertical, Plus, Table2, Tags, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -10,6 +10,7 @@ import {
   createField,
   duplicateMessagePackKeys,
   duplicatePrimaryKeys,
+  formatTypeLabel,
   formatValue,
   isListType,
   matchesTagRule,
@@ -30,6 +31,7 @@ const META_TAGS_WIDTH = 180;
 const FIELD_WIDTH = 190;
 const ADD_FIELD_WIDTH = 44;
 const ROW_HEIGHT = 34;
+const SECONDARY_BADGE_VARIANTS = 5;
 
 type VisibleRow = { row: RowDefinition; originalIndex: number; filteredOut: boolean };
 type GridField = number | "tags";
@@ -82,7 +84,14 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
       ),
     [documents]
   );
-  const fields = table.fields.map((field) => field.name);
+  const fieldOptions = table.fields.map((field) => ({ name: field.name, type: field.type }));
+  const fields = fieldOptions.map((field) => field.name);
+  const allDocuments = useMemo(() => Object.values(documents), [documents]);
+  const settingsIssues = useMemo(() => tableSettingsIssues(table, allDocuments, tableDocuments), [allDocuments, table, tableDocuments]);
+  const refTargets = useMemo(
+    () => tableDocuments.filter((item) => item.definition.typeName !== table.typeName && targetKeyOptions(item.definition).length > 0),
+    [table.typeName, tableDocuments]
+  );
 
   const updatePrimary = (nextFields: string[]) => {
     updateDocument(document.relativePath, "Edit primary key", (draft) => {
@@ -115,9 +124,10 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
   };
 
   const addRef = () => {
-    const target = tableDocuments[0]?.definition;
+    const target = refTargets[0]?.definition;
     if (!target) return;
-    const targetFields = target.keys.primary.fields;
+    const targetKey = targetKeyOptions(target)[0];
+    const targetField = targetKey?.fields[0] ?? "";
     updateDocument(document.relativePath, "Add MasterRef", (draft) => {
       if (draft.definition.kind !== "table") return;
       const draftTable = draft.definition;
@@ -125,11 +135,11 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
       draftTable.refs.push({
         name: uniqueRefName(draftTable, `${target.table}Ref`),
         target: target.typeName,
-        targetKey: { primary: true, fields: [] },
-        fields: targetFields.map((targetField) => ({
+        targetKey: targetKey?.targetKey ?? { primary: true, fields: [] },
+        fields: targetField ? [{
           local: localFieldForTarget(draftTable.fields, targetField),
           target: targetField
-        }))
+        }] : []
       });
     });
   };
@@ -146,7 +156,8 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
             <div className="settings-section-title compact-title">
               <h3>Primary Key</h3>
             </div>
-            <KeyFieldsEditor availableFields={fields} fields={table.keys.primary.fields} onChange={updatePrimary} />
+            <KeyFieldsEditor availableFields={fieldOptions} fields={table.keys.primary.fields} onChange={updatePrimary} />
+            <SettingsIssueList issues={settingsIssues.primary} />
           </div>
 
           <div className="table-settings-section">
@@ -156,7 +167,7 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
             <div className="secondary-key-list">
               {(table.keys.secondary ?? []).map((key, index) => (
                 <div className="secondary-key-row" key={index}>
-                  <label className="check-row">
+                  <label className={clsx("check-row", (key.unique ?? true) && "checked")}>
                     <input
                       checked={key.unique ?? true}
                       type="checkbox"
@@ -165,10 +176,11 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
                     Unique
                   </label>
                   <KeyFieldsEditor
-                    availableFields={fields}
+                    availableFields={fieldOptions}
                     fields={key.fields}
                     onChange={(nextFields) => updateSecondary(index, (target) => void (target.fields = nextFields))}
                   />
+                  <SettingsIssueList issues={settingsIssues.secondary[index] ?? []} />
                   <button className="icon-button danger-icon" title="Delete secondary key" onClick={() => deleteSecondary(index)}>
                     <Trash2 size={14} />
                   </button>
@@ -197,11 +209,12 @@ function TableSettingsFoldout({ document, table }: { document: DefinitionDocumen
                   refIndex={index}
                   table={table}
                   tableDocuments={tableDocuments}
+                  issues={settingsIssues.refs[index] ?? []}
                 />
               ))}
               {(table.refs ?? []).length === 0 && <span className="muted">No MasterRef definitions.</span>}
               <div className="list-add-row">
-                <button className="secondary-button compact list-add-button" disabled={tableDocuments.length === 0} onClick={addRef}>
+                <button className="secondary-button compact list-add-button" disabled={refTargets.length === 0} onClick={addRef}>
                   <Plus size={14} />
                   Add
                 </button>
@@ -219,44 +232,104 @@ function KeyFieldsEditor({
   fields,
   onChange
 }: {
-  availableFields: string[];
+  availableFields: Array<{ name: string; type: string }>;
   fields: string[];
   onChange: (fields: string[]) => void;
 }) {
+  const [dragIndex, setDragIndex] = useState<number>();
+  const [dropGap, setDropGap] = useState<number>();
+  const dragIndexRef = useRef<number | undefined>(undefined);
+  const dropGapRef = useRef<number | undefined>(undefined);
+  const editorRef = useRef<HTMLDivElement>(null);
+
   const setField = (index: number, value: string) => onChange(fields.map((field, fieldIndex) => (fieldIndex === index ? value : field)));
-  const move = (index: number, delta: number) => {
-    const nextIndex = index + delta;
-    if (nextIndex < 0 || nextIndex >= fields.length) return;
+
+  const moveToGap = useCallback((index: number, gap: number) => {
+    let nextIndex = Math.max(0, Math.min(gap, fields.length));
+    if (index < nextIndex) nextIndex -= 1;
+    if (nextIndex === index) return;
     const next = [...fields];
     const [field] = next.splice(index, 1);
     next.splice(nextIndex, 0, field);
     onChange(next);
+  }, [fields, onChange]);
+
+  const startDrag = (event: React.PointerEvent<HTMLElement>, index: number) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragIndexRef.current = index;
+    dropGapRef.current = index;
+    setDragIndex(index);
+    setDropGap(index);
   };
 
+  useEffect(() => {
+    if (dragIndex == null) return;
+    const updateGap = (clientY: number) => {
+      const rows = Array.from(editorRef.current?.querySelectorAll<HTMLElement>("[data-key-field-index]") ?? []);
+      let nextGap = fields.length;
+      for (const row of rows) {
+        const index = Number(row.dataset.keyFieldIndex);
+        const rect = row.getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) {
+          nextGap = index;
+          break;
+        }
+      }
+      dropGapRef.current = nextGap;
+      setDropGap(nextGap);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      event.preventDefault();
+      updateGap(event.clientY);
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      event.preventDefault();
+      const sourceIndex = dragIndexRef.current;
+      const targetGap = dropGapRef.current;
+      if (sourceIndex != null && targetGap != null) moveToGap(sourceIndex, targetGap);
+      dragIndexRef.current = undefined;
+      dropGapRef.current = undefined;
+      setDragIndex(undefined);
+      setDropGap(undefined);
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", onPointerUp, { passive: false });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [dragIndex, fields, moveToGap]);
+
   return (
-    <div className="key-fields-editor">
+    <div className="key-fields-editor" ref={editorRef}>
       {fields.map((field, index) => (
-        <div className="key-field-row" key={`${field}-${index}`}>
-          <select value={field} onChange={(event) => setField(index, event.target.value)}>
-            {availableFields.map((candidate) => (
-              <option key={candidate} value={candidate}>
-                {candidate}
-              </option>
-            ))}
-          </select>
-          <button className="icon-button" disabled={index === 0} title="Move up" onClick={() => move(index, -1)}>
-            ↑
-          </button>
-          <button className="icon-button" disabled={index === fields.length - 1} title="Move down" onClick={() => move(index, 1)}>
-            ↓
-          </button>
-          <button className="icon-button danger-icon" disabled={fields.length <= 1} title="Remove field" onClick={() => onChange(fields.filter((_, fieldIndex) => fieldIndex !== index))}>
-            <Trash2 size={13} />
-          </button>
+        <div className="key-field-row-wrap" key={`${field}-${index}`}>
+          {dropGap === index && <div className="key-drop-marker" />}
+          <div
+            className={clsx("key-field-row", dragIndex === index && "dragging")}
+            data-key-field-index={index}
+          >
+            <button className="icon-button key-field-drag-handle" title="Drag to reorder key field" onPointerDown={(event) => startDrag(event, index)}>
+              <GripVertical size={13} />
+            </button>
+            <select value={field} onChange={(event) => setField(index, event.target.value)}>
+              {availableFields.map((candidate) => (
+                <option key={candidate.name} value={candidate.name}>
+                  {`${candidate.name}\u00a0\u00a0(${formatTypeLabel(candidate.type)})`}
+                </option>
+              ))}
+            </select>
+            <button className="icon-button danger-icon" disabled={fields.length <= 1} title="Remove field" onClick={() => onChange(fields.filter((_, fieldIndex) => fieldIndex !== index))}>
+              <Trash2 size={13} />
+            </button>
+          </div>
         </div>
       ))}
+      {dropGap === fields.length && <div className="key-drop-marker" />}
       <div className="list-add-row">
-        <button className="secondary-button compact list-add-button" disabled={availableFields.length === 0} onClick={() => onChange([...fields, availableFields[0]])}>
+        <button className="secondary-button compact list-add-button" disabled={availableFields.length === 0} onClick={() => onChange([...fields, availableFields[0].name])}>
           <Plus size={13} />
           Add
         </button>
@@ -267,12 +340,14 @@ function KeyFieldsEditor({
 
 function MasterRefEditor({
   document,
+  issues,
   reference,
   refIndex,
   table,
   tableDocuments
 }: {
   document: DefinitionDocument;
+  issues: string[];
   reference: MasterRefDefinition;
   refIndex: number;
   table: TableDefinition;
@@ -282,6 +357,13 @@ function MasterRefEditor({
   const targetDocument = tableDocuments.find((item) => item.definition.typeName === reference.target) ?? tableDocuments[0];
   const keyOptions = targetDocument ? targetKeyOptions(targetDocument.definition) : [];
   const selectedKey = selectedTargetKeyId(reference, keyOptions);
+  const selectedKeyOption = keyOptions.find((item) => item.id === selectedKey);
+  const selectableTargets = tableDocuments.filter((item) => item.definition.typeName !== table.typeName);
+  const targetOptions =
+    targetDocument && targetDocument.definition.typeName === table.typeName
+      ? [targetDocument, ...selectableTargets]
+      : selectableTargets;
+  const localField = reference.fields[0]?.local ?? table.fields[0]?.name ?? "";
 
   const updateRef = (recipe: (reference: MasterRefDefinition, draftTable: TableDefinition) => void) => {
     updateDocument(document.relativePath, "Edit MasterRef", (draft) => {
@@ -297,11 +379,14 @@ function MasterRefEditor({
     const key = targetKeyOptions(nextTarget)[0];
     updateRef((target) => {
       target.target = nextTarget.typeName;
-      target.targetKey = key.targetKey;
-      target.fields = key.fields.map((targetField) => ({
-        local: localFieldForTarget(table.fields, targetField),
-        target: targetField
-      }));
+      target.targetKey = key?.targetKey ?? { primary: true, fields: [] };
+      const targetField = key?.fields[0] ?? "";
+      target.fields = targetField
+        ? [{
+            local: localFieldForTarget(table.fields, targetField),
+            target: targetField
+          }]
+        : [];
     });
   };
 
@@ -310,10 +395,20 @@ function MasterRefEditor({
     if (!option) return;
     updateRef((target) => {
       target.targetKey = option.targetKey;
-      target.fields = option.fields.map((targetField) => ({
-        local: target.fields.find((mapping) => mapping.target === targetField)?.local ?? localFieldForTarget(table.fields, targetField),
-        target: targetField
-      }));
+      const targetField = option.fields[0] ?? "";
+      target.fields = targetField
+        ? [{
+            local: target.fields[0]?.local ?? localFieldForTarget(table.fields, targetField),
+            target: targetField
+          }]
+        : [];
+    });
+  };
+
+  const applyLocalField = (fieldName: string) => {
+    updateRef((target) => {
+      const targetField = selectedKeyOption?.fields[0] ?? target.fields[0]?.target ?? "";
+      target.fields = targetField ? [{ local: fieldName, target: targetField }] : [];
     });
   };
 
@@ -326,70 +421,82 @@ function MasterRefEditor({
 
   return (
     <div className="master-ref-row">
-      <input value={reference.name} onChange={(event) => updateRef((target) => void (target.name = event.target.value))} />
-      <select value={targetDocument?.definition.typeName ?? ""} onChange={(event) => applyTarget(event.target.value)}>
-        {tableDocuments.map((item) => (
-          <option key={item.definition.typeName} value={item.definition.typeName}>
-            {item.definition.typeName}
-          </option>
-        ))}
-      </select>
-      <select value={selectedKey} onChange={(event) => applyTargetKey(event.target.value)}>
-        {keyOptions.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <div className="ref-mapping-list">
-        {reference.fields.map((mapping, mappingIndex) => (
-          <label className="ref-mapping-row" key={`${mapping.target}-${mappingIndex}`}>
-            <span>{mapping.target}</span>
-            <select
-              value={mapping.local}
-              onChange={(event) =>
-                updateRef((target) => {
-                  target.fields[mappingIndex].local = event.target.value;
-                })
-              }
-            >
-              {table.fields.map((field) => (
-                <option key={field.name} value={field.name}>
-                  {field.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        ))}
+      <div className="master-ref-property-row">
+        <label className="master-ref-field">
+          <span>Property Name</span>
+          <input value={reference.name} onChange={(event) => updateRef((target) => void (target.name = event.target.value))} />
+        </label>
+        <button className="icon-button danger-icon" title="Delete MasterRef" onClick={deleteRef}>
+          <Trash2 size={14} />
+        </button>
       </div>
-      <button className="icon-button danger-icon" title="Delete MasterRef" onClick={deleteRef}>
-        <Trash2 size={14} />
-      </button>
+      <div className="master-ref-control-row">
+        <label className="master-ref-field">
+          <span>Field</span>
+          <select value={localField} onChange={(event) => applyLocalField(event.target.value)}>
+            {table.fields.map((field) => (
+              <option key={field.name} value={field.name}>
+                {`${field.name}\u00a0\u00a0(${formatTypeLabel(field.type)})`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="master-ref-arrow" aria-hidden="true">→</span>
+        <label className="master-ref-field">
+          <span>Master</span>
+          <select value={targetDocument?.definition.typeName ?? ""} onChange={(event) => applyTarget(event.target.value)}>
+            {targetOptions.map((item) => (
+              <option key={item.definition.typeName} value={item.definition.typeName}>
+                {item.definition.typeName}
+                {item.definition.typeName === table.typeName ? " (self)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="master-ref-field">
+          <span>Key</span>
+          <select value={selectedKey} onChange={(event) => applyTargetKey(event.target.value)}>
+            {!selectedKey && <option value="">Unsupported key</option>}
+            {keyOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <SettingsIssueList issues={issues} />
     </div>
   );
 }
 
 function targetKeyOptions(table: TableDefinition) {
+  return allTargetKeyOptions(table).filter((option) => option.fields.length === 1);
+}
+
+function allTargetKeyOptions(table: TableDefinition) {
   return [
     {
       id: "primary",
-      label: `Primary (${table.keys.primary.fields.join(", ")})`,
+      label: `Primary: ${table.keys.primary.fields.join(", ")}`,
       fields: table.keys.primary.fields,
-      targetKey: { primary: true, fields: [] }
+      targetKey: { primary: true, fields: [] },
+      unique: true
     },
     ...(table.keys.secondary ?? []).map((key, index) => ({
       id: `secondary:${index}`,
-      label: `Secondary ${index + 1}${key.unique === false ? " non-unique" : " unique"} (${key.fields.join(", ")})`,
+      label: `SK${index + 1} ${key.unique === false ? "non-unique" : "unique"}: ${key.fields.join(", ")}`,
       fields: key.fields,
-      targetKey: { primary: false, fields: [...key.fields] }
+      targetKey: { primary: false, fields: [...key.fields] },
+      unique: key.unique !== false
     }))
   ];
 }
 
 function selectedTargetKeyId(reference: MasterRefDefinition, options: ReturnType<typeof targetKeyOptions>) {
-  if (reference.targetKey.primary) return "primary";
+  if (reference.targetKey.primary) return options.some((option) => option.id === "primary") ? "primary" : "";
   const found = options.find((option) => sameFields(option.fields, reference.targetKey.fields ?? []));
-  return found?.id ?? options[0]?.id ?? "";
+  return found?.id ?? "";
 }
 
 function sameFields(left: string[], right: string[]) {
@@ -407,6 +514,148 @@ function uniqueRefName(table: TableDefinition, preferredName: string) {
     const candidate = `${preferredName}${index}`;
     if (!names.has(candidate)) return candidate;
   }
+}
+
+function SettingsIssueList({ issues }: { issues: string[] }) {
+  if (issues.length === 0) return null;
+  return (
+    <div className="settings-issue-list">
+      {issues.map((issue) => (
+        <div className="settings-issue" key={issue}>
+          <AlertCircle size={13} />
+          <span>{issue}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function tableSettingsIssues(
+  table: TableDefinition,
+  documents: DefinitionDocument[],
+  tableDocuments: Array<DefinitionDocument & { definition: TableDefinition & { kind: "table" } }>
+) {
+  const fieldMap = new Map(table.fields.map((field) => [field.name, field]));
+  const primary = keyDefinitionIssues("Primary key", table.keys.primary.fields, fieldMap, documents);
+  const secondary = (table.keys.secondary ?? []).map((key, index) =>
+    keyDefinitionIssues(`SK${index + 1}`, key.fields, fieldMap, documents)
+  );
+  const keySignatures = new Map<string, string>();
+  registerKeySignature("Primary key", table.keys.primary.fields, keySignatures, primary);
+  (table.keys.secondary ?? []).forEach((key, index) => {
+    registerKeySignature(`SK${index + 1}`, key.fields, keySignatures, secondary[index]);
+  });
+
+  const refs = (table.refs ?? []).map((reference, index) =>
+    masterRefIssues(reference, index, table, tableDocuments)
+  );
+  return { primary, secondary, refs };
+}
+
+function keyDefinitionIssues(
+  label: string,
+  fields: string[],
+  fieldMap: Map<string, FieldDefinition>,
+  documents: DefinitionDocument[]
+) {
+  const issues: string[] = [];
+  if (fields.length === 0) issues.push(`${label} must contain at least one field.`);
+  const seen = new Set<string>();
+  for (const fieldName of fields) {
+    if (seen.has(fieldName)) issues.push(`${label} contains duplicate field "${fieldName}".`);
+    seen.add(fieldName);
+    const field = fieldMap.get(fieldName);
+    if (!field) {
+      issues.push(`${label} references unknown field "${fieldName}".`);
+      continue;
+    }
+    if (!isKeyCompatibleField(field, documents)) {
+      issues.push(`${label} field "${fieldName}" cannot be used as a key.`);
+    }
+  }
+  return issues;
+}
+
+function registerKeySignature(label: string, fields: string[], signatures: Map<string, string>, issues: string[]) {
+  const signature = fields.join("\u0000");
+  if (!signature) return;
+  const previous = signatures.get(signature);
+  if (previous) {
+    issues.push(`${label} duplicates ${previous}.`);
+    return;
+  }
+  signatures.set(signature, label);
+}
+
+function masterRefIssues(
+  reference: MasterRefDefinition,
+  refIndex: number,
+  table: TableDefinition,
+  tableDocuments: Array<DefinitionDocument & { definition: TableDefinition & { kind: "table" } }>
+) {
+  const issues: string[] = [];
+  const targetDocument = tableDocuments.find((item) => item.definition.typeName === reference.target);
+  const fieldMap = new Map(table.fields.map((field) => [field.name, field]));
+  const duplicateNames = new Set<string>();
+  const memberNames = new Set(table.fields.map((field) => field.name));
+
+  for (const [index, item] of (table.refs ?? []).entries()) {
+    if (index === refIndex) continue;
+    if (item.name === reference.name) duplicateNames.add(item.name);
+  }
+  if (!reference.name.trim()) issues.push("Property Name is required.");
+  if (memberNames.has(reference.name)) issues.push(`Property Name "${reference.name}" conflicts with a field.`);
+  if (duplicateNames.has(reference.name)) issues.push(`Property Name "${reference.name}" duplicates another MasterRef.`);
+  if (!targetDocument) {
+    issues.push(`Master "${reference.target}" does not exist.`);
+    return issues;
+  }
+  if (targetDocument.definition.typeName === table.typeName) issues.push("Self MasterRef is not allowed.");
+
+  const allKey = selectedTargetKey(reference, targetDocument.definition);
+  const selectableKey = targetKeyOptions(targetDocument.definition).find((option) => sameFields(option.fields, allKey?.fields ?? []));
+  if (!allKey) {
+    issues.push("Selected key does not exist on target master.");
+    return issues;
+  }
+  if (allKey.fields.length !== 1) {
+    issues.push("Composite keys cannot be used by MasterRef in the editor.");
+    return issues;
+  }
+  if (!selectableKey) issues.push("Selected key is not selectable.");
+  if (reference.fields.length !== 1) issues.push("MasterRef must map exactly one field.");
+
+  const mapping = reference.fields[0];
+  const targetFieldName = allKey.fields[0];
+  const targetField = targetDocument.definition.fields.find((field) => field.name === targetFieldName);
+  if (!mapping) return issues;
+  if (mapping.target !== targetFieldName) issues.push(`Mapped target field must be "${targetFieldName}".`);
+
+  const localField = fieldMap.get(mapping.local);
+  if (!localField) issues.push(`Field "${mapping.local}" does not exist.`);
+  if (!targetField) issues.push(`Target key field "${targetFieldName}" does not exist.`);
+  if (localField && targetField && comparableFieldType(localField.type) !== targetField.type) {
+    issues.push(`Field type ${formatTypeLabel(localField.type)} does not match target key type ${formatTypeLabel(targetField.type)}.`);
+  }
+  if (localField && isListType(localField.type) && allKey.unique === false) {
+    issues.push("Array-valued MasterRef field must target a unique key.");
+  }
+  return issues;
+}
+
+function selectedTargetKey(reference: MasterRefDefinition, table: TableDefinition) {
+  if (reference.targetKey.primary) return allTargetKeyOptions(table)[0];
+  return allTargetKeyOptions(table).find((option) => sameFields(option.fields, reference.targetKey.fields ?? []));
+}
+
+function isKeyCompatibleField(field: FieldDefinition, documents: DefinitionDocument[]) {
+  if (isListType(field.type)) return false;
+  if (field.type === "int" || field.type === "long" || field.type === "string") return true;
+  return documents.some((document) => document.definition.kind === "enum" && document.typeName === field.type);
+}
+
+function comparableFieldType(type: string) {
+  return isListType(type) ? unwrapListType(type) : type;
 }
 
 function RecordsGrid({
@@ -429,7 +678,18 @@ function RecordsGrid({
   });
   const gridTemplateColumns = useMemo(() => gridColumns(table.fields.length, zoom), [table.fields.length, zoom]);
   const primaryFields = new Set(table.keys.primary.fields);
-  const secondaryFields = new Set((table.keys.secondary ?? []).flatMap((key) => key.fields));
+  const secondaryFieldIndexes = useMemo(() => {
+    const indexes = new Map<string, number[]>();
+    (table.keys.secondary ?? []).forEach((key, keyIndex) => {
+      for (const fieldName of key.fields) {
+        const fieldIndexes = indexes.get(fieldName) ?? [];
+        fieldIndexes.push(keyIndex);
+        indexes.set(fieldName, fieldIndexes);
+      }
+    });
+    return indexes;
+  }, [table.keys.secondary]);
+  const secondaryFields = new Set(secondaryFieldIndexes.keys());
   const refFields = new Set((table.refs ?? []).flatMap((ref) => ref.fields.map((field) => field.local)));
   const duplicateKeys = useMemo(() => duplicatePrimaryKeys(table), [table]);
   const duplicateKeyIndexes = useMemo(() => duplicateMessagePackKeys(table.fields), [table.fields]);
@@ -1123,46 +1383,56 @@ function RecordsGrid({
               <Tags size={13} />
               <span>tags</span>
             </div>
-            {table.fields.map((field, index) => (
-              <div
-                className={clsx("grid-col-head", primaryFields.has(field.name) && "primary-col", secondaryFields.has(field.name) && "secondary-col")}
-                data-field-index={index}
-                key={field.name}
-                onContextMenu={(event) => openColumnMenu(event, index)}
-              >
-                <div className="col-head-title">
-                  <button className="drag-handle column-drag-handle" onPointerDown={(event) => drag.start(index, event)} title="Drag to reorder field">
-                    <GripVertical size={13} />
-                  </button>
-                  <span className={clsx("badge key", duplicateKeyIndexes.has(messagePackKey(field, index)) && "duplicate")}>
-                    Key {messagePackKey(field, index)}
-                  </span>
-                  {primaryFields.has(field.name) && <span className="badge primary">PK</span>}
-                  {secondaryFields.has(field.name) && <span className="badge secondary">SK</span>}
-                  {refFields.has(field.name) && <span className="badge ref">REF</span>}
+            {table.fields.map((field, index) => {
+              const secondaryIndexes = secondaryFieldIndexes.get(field.name) ?? [];
+              return (
+                <div
+                  className={clsx("grid-col-head", primaryFields.has(field.name) && "primary-col", secondaryIndexes.length > 0 && "secondary-col")}
+                  data-field-index={index}
+                  key={field.name}
+                  onContextMenu={(event) => openColumnMenu(event, index)}
+                >
+                  <div className="col-head-title">
+                    <button className="drag-handle column-drag-handle" onPointerDown={(event) => drag.start(index, event)} title="Drag to reorder field">
+                      <GripVertical size={13} />
+                    </button>
+                    <span className={clsx("badge key", duplicateKeyIndexes.has(messagePackKey(field, index)) && "duplicate")}>
+                      Key {messagePackKey(field, index)}
+                    </span>
+                    {primaryFields.has(field.name) && <span className="badge primary">PK</span>}
+                    {secondaryIndexes.map((keyIndex) => (
+                      <span
+                        className={clsx("badge secondary", `secondary-${(keyIndex % SECONDARY_BADGE_VARIANTS) + 1}`)}
+                        key={keyIndex}
+                      >
+                        SK{keyIndex + 1}
+                      </span>
+                    ))}
+                    {refFields.has(field.name) && <span className="badge ref">REF</span>}
+                  </div>
+                  <input
+                    className="column-name-input"
+                    value={field.name}
+                    onBlur={() => endInputGroup(`column-name-${index}`)}
+                    onChange={(event) => renameField(index, event.target.value, inputGroup(`column-name-${index}`))}
+                    onFocus={() => beginInputGroup(`column-name-${index}`)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  />
+                  <FieldTypeControl
+                    className="column-type-control"
+                    documents={documents}
+                    type={field.type}
+                    onChange={(nextType) =>
+                      updateDocument(document.relativePath, `Change ${field.name} type`, (draft) => {
+                        if (draft.definition.kind !== "table") return;
+                        draft.definition.fields[index].type = nextType;
+                      })
+                    }
+                    onPointerDown={(event) => event.stopPropagation()}
+                  />
                 </div>
-                <input
-                  className="column-name-input"
-                  value={field.name}
-                  onBlur={() => endInputGroup(`column-name-${index}`)}
-                  onChange={(event) => renameField(index, event.target.value, inputGroup(`column-name-${index}`))}
-                  onFocus={() => beginInputGroup(`column-name-${index}`)}
-                  onPointerDown={(event) => event.stopPropagation()}
-                />
-                <FieldTypeControl
-                  className="column-type-control"
-                  documents={documents}
-                  type={field.type}
-                  onChange={(nextType) =>
-                    updateDocument(document.relativePath, `Change ${field.name} type`, (draft) => {
-                      if (draft.definition.kind !== "table") return;
-                      draft.definition.fields[index].type = nextType;
-                    })
-                  }
-                  onPointerDown={(event) => event.stopPropagation()}
-                />
-              </div>
-            ))}
+              );
+            })}
             <div className="grid-add-field-head">
               <button className="icon-button grid-header-add-field" title="Add field" onClick={addField}>
                 <Plus size={14} />
@@ -1770,7 +2040,7 @@ function defaultEditorValue(
 ): MasterValue {
   if (type === "bool") return false;
   if (type === "int" || type === "long" || type === "float" || type === "double") return 0;
-  if (type.startsWith("list<")) return [];
+  if (isListType(type)) return [];
   if (structDefinitions[type]) return {};
   if (enumInfoForType(documents, type)) return "";
   return "";

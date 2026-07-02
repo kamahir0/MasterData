@@ -131,11 +131,7 @@ export function AppShell() {
   const requestApplicationExit = useCallback(async () => {
     allowCloseRef.current = true;
     if ("__TAURI_INTERNALS__" in window) {
-      try {
-        await getCurrentWindow().destroy();
-      } catch {
-        await invoke("request_app_exit");
-      }
+      await invoke("request_app_exit");
       return;
     }
     window.close();
@@ -185,6 +181,20 @@ export function AppShell() {
       unlistenClose?.();
     };
   }, [chooseNewProjectDirectory, chooseProjectSettingsFile, closeCurrentProject]);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void listen("app-exit-requested", async () => {
+      const discard = await confirmDiscardUnsavedChanges();
+      if (!discard) return;
+      allowCloseRef.current = true;
+      await invoke("request_app_exit");
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => unlisten?.();
+  }, [confirmDiscardUnsavedChanges]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -410,7 +420,7 @@ function WelcomePage({
         {recentProjects.map((path) => (
           <div className="recent-project-row" key={path}>
             <button className="recent-project" onClick={() => onOpenRecent(path)} title={path}>
-              <FolderOpen size={15} />
+              <FolderOpen size={16} />
               <span>{path}</span>
             </button>
             <button
@@ -418,7 +428,7 @@ function WelcomePage({
               title="Remove from recent projects"
               onClick={() => onRemoveRecent(path)}
             >
-              <Trash2 size={14} />
+              <Trash2 size={16} />
             </button>
           </div>
         ))}

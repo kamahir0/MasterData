@@ -63,6 +63,12 @@ export const api = {
   deleteEntry(projectRoot: string, relativePath: string) {
     return invoke<void>("delete_entry", { projectRoot, relativePath });
   },
+  resolveMasterEntryPath(projectRoot: string, relativePath: string) {
+    return invoke<string>("resolve_master_entry_path", { projectRoot, relativePath });
+  },
+  revealMasterEntry(projectRoot: string, relativePath: string) {
+    return invoke<void>("reveal_master_entry", { projectRoot, relativePath });
+  },
   readSidecar(projectRoot: string, relativePath: string) {
     return invoke<TableViewConfig>("read_sidecar", { projectRoot, relativePath });
   },
