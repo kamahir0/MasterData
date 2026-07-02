@@ -22,7 +22,7 @@ import {
 } from "../editorUtils";
 import type { DefinitionDocument, FieldDefinition, MasterRefDefinition, MasterValue, RowDefinition, StructDefinition, TableDefinition } from "../types";
 import { EditorHeader } from "./EditorHost";
-import { BoolToggleInput, FieldTypeControl, ListValueEditorPanel, MasterValueInput, enumInfoForType, type EnumInfo } from "./MasterValueEditor";
+import { BoolToggleInput, FieldTypeControl, ListValueEditorPanel, MasterValueInput, ValuePopoverScope, enumInfoForType, type EnumInfo } from "./MasterValueEditor";
 import { isValidTagName, TagTokenInput, uniqueTags } from "./TagTokenInput";
 
 const ROW_NUMBER_WIDTH = 64;
@@ -637,8 +637,8 @@ function RecordsGrid({
       const activeCellElement = scrollRef.current?.querySelector<HTMLElement>(
         `[data-grid-cell-row="${popoverCell.visibleRowIndex}"][data-grid-cell-field="${popoverCell.fieldIndex}"]`
       );
-      const activePopoverElement = scrollRef.current?.querySelector<HTMLElement>("[data-cell-popover='true']");
-      if (activeCellElement?.contains(target) || activePopoverElement?.contains(target)) return;
+      if (activeCellElement?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-cell-popover='true']")) return;
       setStructCell(undefined);
       setFlagsCell(undefined);
       setListCell(undefined);
@@ -1573,14 +1573,16 @@ function ListCellPopover({
       title={field.name}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <ListValueEditorPanel
-        documents={documents}
-        elementType={elementType}
-        onChange={onChange}
-        showToolbar={false}
-        structDefinitions={structDefinitions}
-        value={value}
-      />
+      <ValuePopoverScope>
+        <ListValueEditorPanel
+          documents={documents}
+          elementType={elementType}
+          onChange={onChange}
+          showToolbar={false}
+          structDefinitions={structDefinitions}
+          value={value}
+        />
+      </ValuePopoverScope>
     </div>
   );
 }
@@ -1689,27 +1691,29 @@ function StructCellPopover({
       style={{ left: position.left, top: position.top }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="struct-cell-fields">
-        {structDefinition.fields.map((structField) => {
-          const hasValue = Object.prototype.hasOwnProperty.call(currentValue, structField.name);
-          const value = hasValue ? currentValue[structField.name] : "";
-          const placeholder = defaultPlaceholderForType(structField.type, documents, structDefinitions);
-          return (
-            <label className="struct-cell-field" key={structField.name}>
-              <span>{structField.name}</span>
-              <StructFieldInput
-                field={structField}
-                onBlur={() => endInputGroup(structField.name)}
-                onChange={(nextValue) => updateStructField(structField, nextValue, inputGroup(structField.name))}
-                onFocus={() => beginInputGroup(structField.name)}
-                placeholder={placeholder}
-                structDefinitions={structDefinitions}
-                value={value}
-              />
-            </label>
-          );
-        })}
-      </div>
+      <ValuePopoverScope>
+        <div className="struct-cell-fields">
+          {structDefinition.fields.map((structField) => {
+            const hasValue = Object.prototype.hasOwnProperty.call(currentValue, structField.name);
+            const value = hasValue ? currentValue[structField.name] : "";
+            const placeholder = defaultPlaceholderForType(structField.type, documents, structDefinitions);
+            return (
+              <label className="struct-cell-field" key={structField.name}>
+                <span>{structField.name}</span>
+                <StructFieldInput
+                  field={structField}
+                  onBlur={() => endInputGroup(structField.name)}
+                  onChange={(nextValue) => updateStructField(structField, nextValue, inputGroup(structField.name))}
+                  onFocus={() => beginInputGroup(structField.name)}
+                  placeholder={placeholder}
+                  structDefinitions={structDefinitions}
+                  value={value}
+                />
+              </label>
+            );
+          })}
+        </div>
+      </ValuePopoverScope>
     </div>
   );
 }

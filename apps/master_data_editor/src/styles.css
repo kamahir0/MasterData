@@ -1622,25 +1622,79 @@ select {
   padding: 0 7px;
 }
 
-.list-struct-editor {
-  display: grid;
-  gap: 7px;
+.nested-value-input {
+  position: relative;
+  width: 100%;
   min-width: 0;
 }
 
-.list-struct-field {
-  display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
-  align-items: start;
+.nested-value-display {
+  justify-content: flex-start;
   gap: 7px;
+  width: 100%;
+  height: var(--grid-input-height);
   min-width: 0;
-}
-
-.list-struct-field > span {
   overflow: hidden;
-  color: #5c6975;
+  border-color: transparent;
+  background: transparent;
+  padding: 0 5px;
+}
+
+.nested-value-display:hover,
+.nested-value-display.open {
+  background: #f2f6fa;
+  border-color: transparent;
+}
+
+.nested-value-display > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nested-value-count {
+  flex: none;
+  margin-left: auto;
+  color: #657383;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nested-value-popover {
+  position: fixed;
+  z-index: 140;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  width: min(260px, calc(100vw - 24px));
+  min-height: 0;
+  max-height: min(380px, calc(100vh - 24px));
+  overflow: hidden;
+  border: 1px solid #b9c6d4;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(31, 45, 61, 0.2);
+}
+
+.nested-struct-panel {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.nested-struct-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.nested-struct-field > span {
+  overflow: hidden;
+  color: #596878;
   font-size: 12px;
-  line-height: var(--grid-input-height);
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2316,6 +2370,7 @@ select {
 :root[data-theme="dark"] .tag-token-menu,
 :root[data-theme="dark"] .enum-cell-menu,
 :root[data-theme="dark"] .list-value-popover,
+:root[data-theme="dark"] .nested-value-popover,
 :root[data-theme="dark"] .struct-cell-popover,
 :root[data-theme="dark"] .records-panel,
 :root[data-theme="dark"] .simple-editor,
@@ -2466,10 +2521,16 @@ select {
   border-color: var(--color-border);
 }
 
-:root[data-theme="dark"] .list-struct-field > span,
+:root[data-theme="dark"] .nested-value-display:hover,
+:root[data-theme="dark"] .nested-value-display.open {
+  background: var(--color-hover);
+}
+
+:root[data-theme="dark"] .nested-struct-field > span,
 :root[data-theme="dark"] .list-value-empty,
 :root[data-theme="dark"] .list-value-toolbar strong,
 :root[data-theme="dark"] .list-cell-count,
+:root[data-theme="dark"] .nested-value-count,
 :root[data-theme="dark"] .list-drag-handle {
   color: var(--color-text-muted);
 }

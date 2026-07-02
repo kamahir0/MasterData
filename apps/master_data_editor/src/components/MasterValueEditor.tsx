@@ -1,9 +1,26 @@
 import clsx from "clsx";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { coerceValue } from "../store";
 import { availableTypeOptionGroups, isListType, setListType, unwrapListType } from "../editorUtils";
 import type { DefinitionDocument, MasterValue, StructDefinition } from "../types";
+
+type ValuePopoverScopeValue = {
+  activeKey?: string;
+  setActiveKey: React.Dispatch<React.SetStateAction<string | undefined>>;
+};
+
+const ValuePopoverScopeContext = createContext<ValuePopoverScopeValue | undefined>(undefined);
+
+export function ValuePopoverScope({ children }: { children: React.ReactNode }) {
+  const [activeKey, setActiveKey] = useState<string>();
+  return (
+    <ValuePopoverScopeContext.Provider value={{ activeKey, setActiveKey }}>
+      {children}
+    </ValuePopoverScopeContext.Provider>
+  );
+}
 
 export type EnumInfo = {
   flags: boolean;
@@ -100,18 +117,18 @@ export function MasterValueInput({
   type: string;
   value: MasterValue | undefined;
 }) {
-  if (isListType(type)) {
+  if (isListType(type) || structDefinitions[type]) {
     return (
-      <ListValueInput
+      <CompositeValueInput
         className={className}
         documents={documents}
-        elementType={unwrapListType(type)}
         onBlur={onBlur}
         onChange={onChange}
         onFocus={onFocus}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         structDefinitions={structDefinitions}
+        type={type}
         value={value}
       />
     );
@@ -146,30 +163,6 @@ export function MasterValueInput({
       />
     );
   }
-  if (structDefinitions[type]) {
-    return (
-      <textarea
-        className={clsx("master-value-textarea", className)}
-        defaultValue={formatJsonValue(value)}
-        placeholder={placeholder}
-        onBlur={(event) => {
-          onBlur?.();
-          const raw = event.target.value.trim();
-          if (!raw) {
-            onChange({});
-            return;
-          }
-          try {
-            onChange(JSON.parse(raw) as MasterValue);
-          } catch {
-            onChange(raw);
-          }
-        }}
-        onFocus={onFocus}
-        onKeyDown={onKeyDown}
-      />
-    );
-  }
   return (
     <input
       className={clsx("grid-cell-input", className)}
@@ -186,32 +179,71 @@ export function MasterValueInput({
   );
 }
 
-function ListValueInput({
+function CompositeValueInput({
   className,
   documents,
-  elementType,
   onBlur,
   onChange,
   onFocus,
   onKeyDown,
   placeholder,
   structDefinitions,
+  type,
   value
 }: {
   className?: string;
   documents: Record<string, DefinitionDocument>;
-  elementType: string;
   onBlur?: () => void;
-  onChange: (value: MasterValue[]) => void;
+  onChange: (value: MasterValue) => void;
   onFocus?: () => void;
   onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
   placeholder: string;
   structDefinitions: Record<string, StructDefinition>;
+  type: string;
   value: MasterValue | undefined;
 }) {
-  const [open, setOpen] = useState(false);
+  const scope = useContext(ValuePopoverScopeContext);
+  const instanceKey = useId();
+  const [localOpen, setLocalOpen] = useState(false);
+  const [position, setPosition] = useState<{ left: number; portalTarget?: HTMLElement; top: number }>();
   const rootRef = useRef<HTMLDivElement>(null);
-  const items = Array.isArray(value) ? value : [];
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const list = isListType(type);
+  const elementType = list ? unwrapListType(type) : type;
+  const count = Array.isArray(value) ? value.length : 0;
+  const open = scope ? scope.activeKey === instanceKey : localOpen;
+
+  const setOpenState = (next: boolean) => {
+    if (scope) {
+      scope.setActiveKey(next ? instanceKey : undefined);
+      return;
+    }
+    setLocalOpen(next);
+  };
+
+  const updatePosition = () => {
+    const button = buttonRef.current;
+    const rect = button?.getBoundingClientRect();
+    if (!button || !rect) return;
+    const parentPopover = button.closest<HTMLElement>("[data-cell-popover='true']");
+    const grid = button.closest<HTMLElement>(".master-grid");
+    if (parentPopover && grid) {
+      const gridRect = grid.getBoundingClientRect();
+      const parentRect = parentPopover.getBoundingClientRect();
+      setPosition({
+        left: parentRect.right - gridRect.left,
+        portalTarget: grid,
+        top: rect.top - gridRect.top
+      });
+      return;
+    }
+    const anchorRight = parentPopover?.getBoundingClientRect().right ?? rect.right;
+    setPosition({
+      left: Math.min(anchorRight + 4, Math.max(8, window.innerWidth - 272)),
+      top: Math.min(rect.top, Math.max(8, window.innerHeight - 388))
+    });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -219,44 +251,130 @@ function ListValueInput({
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (rootRef.current?.contains(target)) return;
-      setOpen(false);
+      if (popoverRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-cell-popover='true']")) return;
+      setOpenState(false);
       onBlur?.();
     };
+    updatePosition();
     window.addEventListener("pointerdown", close, true);
-    return () => window.removeEventListener("pointerdown", close, true);
-  }, [onBlur, open]);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [onBlur, open, scope, instanceKey]);
 
   return (
-    <div className={clsx("list-value-input", className)} ref={rootRef}>
+    <div className={clsx("nested-value-input", className)} ref={rootRef}>
       <button
-        className={clsx("list-value-button", open && "open")}
+        className={clsx("nested-value-display", open && "open")}
+        ref={buttonRef}
         type="button"
         onClick={() => {
-          setOpen((current) => !current);
+          const next = !open;
+          const scrollElement = buttonRef.current?.closest<HTMLElement>(".records-grid");
+          const scrollLeft = scrollElement?.scrollLeft;
+          if (next) updatePosition();
+          setOpenState(next);
+          if (next) {
+            window.requestAnimationFrame(() => {
+              if (scrollElement && scrollLeft != null && scrollElement.scrollLeft < scrollLeft) {
+                scrollElement.scrollLeft = scrollLeft;
+              }
+              updatePosition();
+            });
+          }
           onFocus?.();
         }}
         onFocus={onFocus}
         onKeyDown={onKeyDown}
       >
-        <span>{listSummary(items, elementType, placeholder, documents, structDefinitions)}</span>
-        <strong>({items.length})</strong>
+        <span className={clsx(isEmptyValue(value) && "cell-placeholder")}>
+          {displayValueForType(type, value, documents, structDefinitions) || placeholder}
+        </span>
+        {list && <strong className="nested-value-count">({count})</strong>}
       </button>
-      {open && (
+      {open && position && renderCompositePopover(
         <div
-          className="list-value-popover"
+          className="nested-value-popover"
+          data-cell-popover="true"
+          ref={popoverRef}
+          style={{
+            left: position.left,
+            position: position.portalTarget ? "absolute" : "fixed",
+            top: position.top
+          }}
           onKeyDown={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <ListValueEditorPanel
-            documents={documents}
-            elementType={elementType}
-            onChange={onChange}
-            showToolbar={false}
-            structDefinitions={structDefinitions}
-            value={value}
-          />
-        </div>
+          <ValuePopoverScope>
+            {list ? (
+              <ListValueEditorPanel
+                documents={documents}
+                elementType={elementType}
+                onChange={(nextValue) => onChange(nextValue)}
+                showToolbar={false}
+                structDefinitions={structDefinitions}
+                value={value}
+              />
+            ) : (
+              <StructValueEditorPanel
+                documents={documents}
+                onChange={onChange}
+                structDefinition={structDefinitions[type]}
+                structDefinitions={structDefinitions}
+                value={value}
+              />
+            )}
+          </ValuePopoverScope>
+        </div>,
+        position.portalTarget
       )}
+    </div>
+  );
+}
+
+function renderCompositePopover(popover: React.ReactNode, portalTarget?: HTMLElement) {
+  return portalTarget ? createPortal(popover, portalTarget) : popover;
+}
+
+function StructValueEditorPanel({
+  documents,
+  onChange,
+  structDefinition,
+  structDefinitions,
+  value
+}: {
+  documents: Record<string, DefinitionDocument>;
+  onChange: (value: MasterValue) => void;
+  structDefinition?: StructDefinition;
+  structDefinitions: Record<string, StructDefinition>;
+  value: MasterValue | undefined;
+}) {
+  if (!structDefinition) return null;
+  const map = objectValue(value);
+  const updateStructField = (fieldName: string, nextValue: MasterValue) => {
+    onChange({ ...map, [fieldName]: nextValue });
+  };
+
+  return (
+    <div className="nested-struct-panel">
+      {structDefinition.fields.map((field) => (
+        <label className="nested-struct-field" key={field.name}>
+          <span>{field.name}</span>
+          <MasterValueInput
+            documents={documents}
+            placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
+            onChange={(nextValue) => updateStructField(field.name, nextValue)}
+            structDefinitions={structDefinitions}
+            type={field.type}
+            value={map[field.name]}
+          />
+        </label>
+      ))}
     </div>
   );
 }
@@ -379,7 +497,7 @@ export function ListValueEditorPanel({
                 onPointerDown={(event) => startDrag(event, index)}
               >
                 <GripVertical size={15} />
-                <span>{index + 1}</span>
+                <span>{index}</span>
               </span>
               <ListItemValueEditor
                 documents={documents}
@@ -417,41 +535,15 @@ function ListItemValueEditor({
   structDefinitions: Record<string, StructDefinition>;
   value: MasterValue | undefined;
 }) {
-  const structDefinition = structDefinitions[elementType];
-  if (!structDefinition) {
-    return (
-      <MasterValueInput
-        documents={documents}
-        placeholder={defaultPlaceholderForType(elementType, documents, structDefinitions)}
-        onChange={onChange}
-        structDefinitions={structDefinitions}
-        type={elementType}
-        value={value}
-      />
-    );
-  }
-
-  const map = objectValue(value);
-  const updateStructField = (fieldName: string, nextValue: MasterValue) => {
-    onChange({ ...map, [fieldName]: nextValue });
-  };
-
   return (
-    <div className="list-struct-editor">
-      {structDefinition.fields.map((field) => (
-        <label className="list-struct-field" key={field.name}>
-          <span>{field.name}</span>
-          <MasterValueInput
-            documents={documents}
-            placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
-            onChange={(nextValue) => updateStructField(field.name, nextValue)}
-            structDefinitions={structDefinitions}
-            type={field.type}
-            value={map[field.name]}
-          />
-        </label>
-      ))}
-    </div>
+    <MasterValueInput
+      documents={documents}
+      placeholder={defaultPlaceholderForType(elementType, documents, structDefinitions)}
+      onChange={onChange}
+      structDefinitions={structDefinitions}
+      type={elementType}
+      value={value}
+    />
   );
 }
 
@@ -698,6 +790,10 @@ function defaultPlaceholderForType(
 function objectValue(value: MasterValue | undefined): Record<string, MasterValue> {
   if (value && typeof value === "object" && !Array.isArray(value)) return value;
   return {};
+}
+
+function isEmptyValue(value: MasterValue | undefined) {
+  return value == null || value === "";
 }
 
 function listSummary(
