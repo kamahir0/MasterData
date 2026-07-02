@@ -1378,6 +1378,7 @@ function RecordsGrid({
       <div className="records-grid" ref={scrollRef} onWheel={onWheel}>
         <div className="master-grid" style={{ minWidth: totalGridWidth(table.fields.length, zoom) }}>
           <div className="grid-header" style={{ gridTemplateColumns }}>
+            {drag.state && <div className="gap-marker header-gap-marker" style={{ left: drag.state.left }} />}
             <div className="row-head">#</div>
             <div className="meta-head">
               <Tags size={13} />
@@ -1439,7 +1440,6 @@ function RecordsGrid({
               </button>
             </div>
           </div>
-          {drag.state && <div className="gap-marker records-gap-marker" style={{ left: drag.state.left }} />}
           {contextMenu && (
             <ColumnContextMenu
               canMoveLeft={contextMenu.index > 0}
@@ -1467,6 +1467,7 @@ function RecordsGrid({
             />
           )}
           <div className="virtual-canvas" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+            {drag.state && <div className="gap-marker records-gap-marker" style={{ left: drag.state.left }} />}
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
               const entry = rows[virtualRow.index];
               if (!entry) return null;
@@ -1509,6 +1510,7 @@ function RecordsGrid({
                       </span>
                     )}
                     <button
+                      className="row-delete-button danger-icon"
                       title="Delete record"
                       onClick={(event) => {
                         event.stopPropagation();

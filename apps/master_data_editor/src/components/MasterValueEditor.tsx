@@ -65,7 +65,7 @@ export function FieldTypeControl({
           </optgroup>
         ))}
       </select>
-      <div className="field-cardinality-control">
+      <div className={clsx("field-cardinality-control", !list && "inactive")}>
         <button
           aria-pressed={list}
           aria-label={list ? "Use a single value" : "Use a list of values"}

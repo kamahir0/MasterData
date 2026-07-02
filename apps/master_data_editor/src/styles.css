@@ -1052,8 +1052,11 @@ select {
   grid-template-columns: minmax(0, 1fr) 30px;
   gap: 6px;
   align-items: start;
-  border-bottom: 1px solid #dfe6ee;
-  padding-bottom: 8px;
+  min-width: 0;
+  border: 1px solid #dfe6ee;
+  border-radius: 6px;
+  background: #fbfcfd;
+  padding: 8px;
 }
 
 .secondary-key-row .check-row {
@@ -1071,6 +1074,11 @@ select {
   grid-column: 2;
   grid-row: 1;
   justify-self: end;
+}
+
+.secondary-key-row > .settings-issue-list {
+  grid-column: 1 / -1;
+  grid-row: 3;
 }
 
 .master-ref-row {
@@ -1122,6 +1130,12 @@ select {
 .master-ref-property-row > .danger-icon {
   align-self: end;
   justify-self: end;
+  opacity: 0;
+}
+
+.master-ref-row:hover .master-ref-property-row > .danger-icon,
+.master-ref-row:focus-within .master-ref-property-row > .danger-icon {
+  opacity: 1;
 }
 
 .master-ref-arrow {
@@ -1396,18 +1410,27 @@ select {
   background: #f8fafc;
 }
 
+.field-cardinality-control.inactive {
+  border-color: #edf2f6;
+  background: #fbfcfd;
+}
+
 .field-cardinality-option {
   min-width: 34px;
   height: 100%;
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: #344353;
+  color: #c7d0d9;
   padding: 0 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   font-weight: 700;
   justify-content: center;
+}
+
+.field-cardinality-control.inactive .field-cardinality-option {
+  color: #d9e0e7;
 }
 
 .field-cardinality-option:hover:not(:disabled) {
@@ -1438,6 +1461,12 @@ select {
 .schema-gap-marker {
   top: 8px;
   bottom: 4px;
+}
+
+.header-gap-marker {
+  top: 0;
+  bottom: 0;
+  z-index: 90;
 }
 
 .records-gap-marker {
@@ -2127,6 +2156,21 @@ select {
   pointer-events: none;
 }
 
+.row-head .row-delete-button {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #e2a69b;
+  border-radius: 5px;
+  background: #fff8f6;
+  color: #a52a1a;
+}
+
+.row-head .row-delete-button:hover:not(:disabled) {
+  border-color: #d27a6d;
+  background: #fff0ed;
+  color: #8f2418;
+}
+
 .grid-row:hover .row-head button,
 .grid-row:focus-within .row-head button {
   opacity: 1;
@@ -2647,7 +2691,8 @@ select {
 }
 
 :root[data-theme="dark"] .secondary-key-row {
-  border-bottom-color: var(--color-border);
+  background: var(--color-surface-muted);
+  border-color: var(--color-border);
 }
 
 :root[data-theme="dark"] .master-ref-row {
@@ -2766,8 +2811,17 @@ select {
   border-color: var(--color-border);
 }
 
+:root[data-theme="dark"] .field-cardinality-control.inactive {
+  background: rgba(255, 255, 255, 0.015);
+  border-color: var(--color-border-soft);
+}
+
 :root[data-theme="dark"] .field-cardinality-option {
-  color: var(--color-text);
+  color: var(--color-text-soft);
+}
+
+:root[data-theme="dark"] .field-cardinality-control.inactive .field-cardinality-option {
+  color: #687887;
 }
 
 :root[data-theme="dark"] .field-cardinality-option:hover:not(:disabled) {
@@ -3007,6 +3061,18 @@ select {
 :root[data-theme="dark"] .diagnostic-line.error,
 :root[data-theme="dark"] .error-icon,
 :root[data-theme="dark"] .row-error-marker {
+  color: var(--color-danger-text);
+}
+
+:root[data-theme="dark"] .row-head .row-delete-button {
+  border-color: var(--color-danger-border);
+  background: rgba(255, 155, 140, 0.08);
+  color: var(--color-danger-text);
+}
+
+:root[data-theme="dark"] .row-head .row-delete-button:hover:not(:disabled) {
+  border-color: #b76055;
+  background: rgba(255, 155, 140, 0.16);
   color: var(--color-danger-text);
 }
 
