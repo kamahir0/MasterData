@@ -8,15 +8,18 @@ import type { DefinitionDocument, MasterValue, StructDefinition } from "../types
 
 type ValuePopoverScopeValue = {
   activeKey?: string;
+  selectedKey?: string;
   setActiveKey: React.Dispatch<React.SetStateAction<string | undefined>>;
+  setSelectedKey: React.Dispatch<React.SetStateAction<string | undefined>>;
 };
 
 const ValuePopoverScopeContext = createContext<ValuePopoverScopeValue | undefined>(undefined);
 
 export function ValuePopoverScope({ children }: { children: React.ReactNode }) {
   const [activeKey, setActiveKey] = useState<string>();
+  const [selectedKey, setSelectedKey] = useState<string>();
   return (
-    <ValuePopoverScopeContext.Provider value={{ activeKey, setActiveKey }}>
+    <ValuePopoverScopeContext.Provider value={{ activeKey, selectedKey, setActiveKey, setSelectedKey }}>
       {children}
     </ValuePopoverScopeContext.Provider>
   );
@@ -341,6 +344,10 @@ function renderCompositePopover(popover: React.ReactNode, portalTarget?: HTMLEle
   return portalTarget ? createPortal(popover, portalTarget) : popover;
 }
 
+function opensNestedValuePopover(type: string, structDefinitions: Record<string, StructDefinition>) {
+  return isListType(type) || Boolean(structDefinitions[type]);
+}
+
 function StructValueEditorPanel({
   documents,
   onChange,
@@ -354,6 +361,8 @@ function StructValueEditorPanel({
   structDefinitions: Record<string, StructDefinition>;
   value: MasterValue | undefined;
 }) {
+  const scope = useContext(ValuePopoverScopeContext);
+  const panelKey = useId();
   if (!structDefinition) return null;
   const map = objectValue(value);
   const updateStructField = (fieldName: string, nextValue: MasterValue) => {
@@ -362,19 +371,31 @@ function StructValueEditorPanel({
 
   return (
     <div className="nested-struct-panel">
-      {structDefinition.fields.map((field) => (
-        <label className="nested-struct-field" key={field.name}>
-          <span>{field.name}</span>
-          <MasterValueInput
-            documents={documents}
-            placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
-            onChange={(nextValue) => updateStructField(field.name, nextValue)}
-            structDefinitions={structDefinitions}
-            type={field.type}
-            value={map[field.name]}
-          />
-        </label>
-      ))}
+      {structDefinition.fields.map((field) => {
+        const fieldKey = `${panelKey}:${field.name}`;
+        const selectField = () => {
+          scope?.setSelectedKey(fieldKey);
+          if (!opensNestedValuePopover(field.type, structDefinitions)) scope?.setActiveKey(undefined);
+        };
+        return (
+          <label
+            className={clsx("nested-struct-field", scope?.selectedKey === fieldKey && "selected")}
+            key={field.name}
+            onFocusCapture={selectField}
+            onPointerDownCapture={selectField}
+          >
+            <span>{field.name}</span>
+            <MasterValueInput
+              documents={documents}
+              placeholder={defaultPlaceholderForType(field.type, documents, structDefinitions)}
+              onChange={(nextValue) => updateStructField(field.name, nextValue)}
+              structDefinitions={structDefinitions}
+              type={field.type}
+              value={map[field.name]}
+            />
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -396,6 +417,8 @@ export function ListValueEditorPanel({
   structDefinitions: Record<string, StructDefinition>;
   value: MasterValue | undefined;
 }) {
+  const scope = useContext(ValuePopoverScopeContext);
+  const panelKey = useId();
   const [dragIndex, setDragIndex] = useState<number>();
   const [dropGap, setDropGap] = useState<number>();
   const dragIndexRef = useRef<number | undefined>(undefined);
@@ -484,34 +507,47 @@ export function ListValueEditorPanel({
         {items.length === 0 && (
           <div className="list-value-empty">Empty list</div>
         )}
-        {items.map((item, index) => (
-          <div className="list-value-row-wrap" key={index}>
-            {dropGap === index && <div className="list-drop-marker" />}
-            <div
-              className={clsx("list-value-row", dragIndex === index && "dragging")}
-              data-list-item-index={index}
-            >
-              <span
-                className="list-drag-handle"
-                title="Drag to reorder"
-                onPointerDown={(event) => startDrag(event, index)}
+        {items.map((item, index) => {
+          const itemKey = `${panelKey}:${index}`;
+          const selectItem = () => {
+            scope?.setSelectedKey(itemKey);
+            if (!opensNestedValuePopover(elementType, structDefinitions)) scope?.setActiveKey(undefined);
+          };
+          return (
+            <div className="list-value-row-wrap" key={index}>
+              {dropGap === index && <div className="list-drop-marker" />}
+              <div
+                className={clsx(
+                  "list-value-row",
+                  dragIndex === index && "dragging",
+                  scope?.selectedKey === itemKey && "selected"
+                )}
+                data-list-item-index={index}
+                onFocusCapture={selectItem}
+                onPointerDownCapture={selectItem}
               >
-                <GripVertical size={15} />
-                <span>{index}</span>
-              </span>
-              <ListItemValueEditor
-                documents={documents}
-                elementType={elementType}
-                onChange={(nextValue) => updateItem(index, nextValue)}
-                structDefinitions={structDefinitions}
-                value={item}
-              />
-              <button className="list-row-delete" title="Remove item" type="button" onClick={() => removeItem(index)}>
-                <Trash2 size={13} />
-              </button>
+                <span
+                  className="list-drag-handle"
+                  title="Drag to reorder"
+                  onPointerDown={(event) => startDrag(event, index)}
+                >
+                  <GripVertical size={15} />
+                  <span>{index}</span>
+                </span>
+                <ListItemValueEditor
+                  documents={documents}
+                  elementType={elementType}
+                  onChange={(nextValue) => updateItem(index, nextValue)}
+                  structDefinitions={structDefinitions}
+                  value={item}
+                />
+                <button className="list-row-delete" title="Remove item" type="button" onClick={() => removeItem(index)}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {dropGap === items.length && <div className="list-drop-marker" />}
         <button className="list-add-row-button" type="button" onClick={addItem}>
           <Plus size={14} />
