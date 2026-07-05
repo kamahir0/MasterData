@@ -936,7 +936,7 @@ pub fn run() {
             save_preferences,
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build Lilja.MasterData editor")
+        .expect("failed to build MasterData editor")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if ALLOW_APP_EXIT.swap(false, Ordering::SeqCst) {
@@ -1286,7 +1286,7 @@ fn modified_millis(path: &Path) -> u128 {
 }
 
 fn preferences_path() -> Result<PathBuf> {
-    let dirs = ProjectDirs::from("com", "kamahir0", "LiljaMasterDataEditor")
+    let dirs = ProjectDirs::from("com", "kamahir0", "MasterDataEditor")
         .with_context(|| "failed to resolve app config directory")?;
     let dir = dirs.config_dir();
     fs::create_dir_all(dir)?;

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Lilja.MasterData.GeneratedBuilder;
+namespace MasterData.GeneratedBuilder;
 
 public sealed class BuildInput
 {

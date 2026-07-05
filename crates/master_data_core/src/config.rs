@@ -143,7 +143,7 @@ impl MasterDataConfig {
     pub fn ensure_tool_version(&self, actual_version: &str) -> Result<()> {
         if self.tool.version != actual_version {
             anyhow::bail!(
-                "project requires Lilja.MasterData {}, but this tool is {}",
+                "project requires MasterData {}, but this tool is {}",
                 self.tool.version,
                 actual_version
             );

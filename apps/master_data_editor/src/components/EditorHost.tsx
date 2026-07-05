@@ -135,7 +135,7 @@ function EmptyState() {
   return (
     <div className="empty-state">
       <Database size={36} />
-      <h1>Open a Lilja.MasterData project</h1>
+      <h1>Open a MasterData project</h1>
       <p>Choose a YAML definition from the explorer.</p>
     </div>
   );

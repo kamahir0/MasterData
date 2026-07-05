@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const BUILDER_CSPROJ: &str =
-    include_str!("../../../embedded/builder/Lilja.MasterData.GeneratedBuilder.csproj");
+    include_str!("../../../embedded/builder/MasterData.GeneratedBuilder.csproj");
 const BUILDER_PROGRAM: &str = include_str!("../../../embedded/builder/Program.cs");
 const BUILDER_INPUT: &str = include_str!("../../../embedded/builder/Builder/BuildInput.cs");
 const BUILDER_BINARY_BUILDER: &str =
@@ -167,7 +167,7 @@ pub fn clean_project(root: impl AsRef<Path>) -> Result<()> {
     config.ensure_tool_version(TOOL_VERSION)?;
     remove_dir_if_exists(root.join(&config.csharp.output))?;
     remove_dir_if_exists(root.join(&config.memory.output))?;
-    remove_dir_if_exists(root.join(".lilja/temp"))?;
+    remove_dir_if_exists(root.join(".master-data/temp"))?;
     Ok(())
 }
 
@@ -203,7 +203,7 @@ fn write_build_input(
     validated: &ValidatedProject,
 ) -> Result<()> {
     let input = create_build_input(root, config, validated);
-    let path = root.join(".lilja/temp/build-input.json");
+    let path = root.join(".master-data/temp/build-input.json");
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create directory: {}", parent.display()))?;
@@ -217,14 +217,14 @@ fn expand_builder_project(
     config: &MasterDataConfig,
     files: &[crate::codegen::GeneratedFile],
 ) -> Result<()> {
-    let builder_root = root.join(".lilja/temp/builder");
+    let builder_root = root.join(".master-data/temp/builder");
     let builder_dir = builder_root.join("Builder");
     let generated_dir = builder_root.join("Generated");
 
     fs::create_dir_all(&builder_dir)?;
     fs::create_dir_all(&generated_dir)?;
     fs::write(
-        builder_root.join("Lilja.MasterData.GeneratedBuilder.csproj"),
+        builder_root.join("MasterData.GeneratedBuilder.csproj"),
         BUILDER_CSPROJ,
     )?;
     fs::write(builder_root.join("Program.cs"), BUILDER_PROGRAM)?;
@@ -255,11 +255,11 @@ fn expand_builder_project(
 }
 
 fn run_dotnet_builder(root: &Path) -> Result<()> {
-    let builder_root = root.join(".lilja/temp/builder");
+    let builder_root = root.join(".master-data/temp/builder");
     let status = Command::new("dotnet")
         .arg("run")
         .arg("--project")
-        .arg("Lilja.MasterData.GeneratedBuilder.csproj")
+        .arg("MasterData.GeneratedBuilder.csproj")
         .arg("--")
         .arg("../build-input.json")
         .current_dir(&builder_root)
@@ -286,7 +286,7 @@ fn sync_directory(source: PathBuf, destination: PathBuf, init: bool) -> Result<(
         anyhow::bail!("sync source does not exist: {}", source.display());
     }
 
-    let marker = destination.join(".lilja-master-data-generated");
+    let marker = destination.join(".master-data-generated");
     if destination.exists() && !marker.exists() {
         if !init {
             anyhow::bail!(
@@ -299,7 +299,7 @@ fn sync_directory(source: PathBuf, destination: PathBuf, init: bool) -> Result<(
     fs::create_dir_all(&destination)?;
     fs::write(
         &marker,
-        "This directory is managed by Lilja.MasterData.\nDo not place hand-written files here.\n",
+        "This directory is managed by MasterData.\nDo not place hand-written files here.\n",
     )?;
 
     for entry in fs::read_dir(&destination)? {
@@ -309,7 +309,7 @@ fn sync_directory(source: PathBuf, destination: PathBuf, init: bool) -> Result<(
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
-        if name == ".lilja-master-data-generated" || name.ends_with(".meta") {
+        if name == ".master-data-generated" || name.ends_with(".meta") {
             continue;
         }
         if path.is_dir() {
@@ -396,7 +396,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("lilja-master-data-{name}-{nonce}"))
+        std::env::temp_dir().join(format!("master-data-{name}-{nonce}"))
     }
 
     #[test]
@@ -448,7 +448,7 @@ mod tests {
 
         let destination = root.join("synced/cs");
         fs::create_dir_all(&destination).unwrap();
-        fs::write(destination.join(".lilja-master-data-generated"), "marker").unwrap();
+        fs::write(destination.join(".master-data-generated"), "marker").unwrap();
         fs::write(destination.join("Old.cs"), "old").unwrap();
         fs::write(destination.join("Old.cs.meta"), "meta").unwrap();
 

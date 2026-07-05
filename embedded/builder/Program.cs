@@ -1,8 +1,8 @@
-using Lilja.MasterData.GeneratedBuilder;
+using MasterData.GeneratedBuilder;
 
 if (args.Length != 1)
 {
-    Console.Error.WriteLine("Usage: Lilja.MasterData.GeneratedBuilder <build-input.json>");
+    Console.Error.WriteLine("Usage: MasterData.GeneratedBuilder <build-input.json>");
     return 2;
 }
 

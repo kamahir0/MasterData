@@ -1,6 +1,6 @@
-# Lilja.MasterData
+# MasterData
 
-Lilja.MasterData is a master-data conversion toolchain for Unity games.
+MasterData is a master-data conversion toolchain for Unity games.
 
 It stores master data as text-based YAML, generates C# source files for
 MasterMemory, builds a MasterMemory binary, and optionally synchronizes the
@@ -11,7 +11,7 @@ management of the generated `MemoryDatabase` remain project-specific.
 
 ## Package Role
 
-Lilja.MasterData is split into three layers:
+MasterData is split into three layers:
 
 - `MasterDataInit-{platform}`: an initializer that creates the project template
   and installs converter binaries into the project.
@@ -127,7 +127,7 @@ configured build profile tags.
 
 The converter searches upward from the current directory for
 `project-settings.yaml`. It checks `tool.version` before running and fails if
-the project requires a different Lilja.MasterData version.
+the project requires a different MasterData version.
 
 ## Config File
 
@@ -264,7 +264,7 @@ rows:
 ```
 
 `data.tags` is a normal field value. `meta.tags` is a build tag used only by
-Lilja.MasterData and is not emitted to generated C# or MasterMemory binaries.
+MasterData and is not emitted to generated C# or MasterMemory binaries.
 
 Build profile filtering rules:
 
@@ -279,7 +279,7 @@ Build profile filtering rules:
 
 `refs` generate helper methods for resolving relationships between table
 records. Ref helpers are excluded from temporary binary builder compilation
-with `#if !LILJA_MASTERDATA_BUILD`.
+with `#if !MASTER_DATA_BUILD`.
 
 Rules:
 
@@ -297,7 +297,7 @@ Rules:
 `sync` destinations are managed directories. The converter writes a marker file:
 
 ```text
-.lilja-master-data-generated
+.master-data-generated
 ```
 
 After a directory is marked, sync deletes existing non-`.meta` files in the
@@ -306,7 +306,7 @@ destination and copies generated output from local `dist` directories. Unity
 
 If a destination exists and is not marked, `sync` fails unless `--init` is used.
 Use `--init` only for directories that should be fully managed by
-Lilja.MasterData.
+MasterData.
 
 ## Generated Local Files
 
@@ -314,7 +314,7 @@ The converter may create these local directories inside the master-data project:
 
 ```text
 dist/
-.lilja/
+.master-data/
 ```
 
 They are generated artifacts and should not be committed.

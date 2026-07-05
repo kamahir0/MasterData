@@ -1,4 +1,4 @@
-# Lilja.MasterData Editor Tools
+# MasterData Editor Tools
 
 These scripts build the Tauri desktop app and immediately launch the result for
 local testing.

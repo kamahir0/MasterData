@@ -1,6 +1,6 @@
-# Lilja.MasterData Editor
+# MasterData Editor
 
-Tauri-based editor for Lilja.MasterData projects.
+Tauri-based editor for MasterData projects.
 
 ## Editing
 
@@ -23,7 +23,7 @@ This app is intended for developer use and is not notarized. After copying the
 app to `/Applications`, run once:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/LiljaMasterDataEditor.app
+xattr -dr com.apple.quarantine /Applications/MasterData Editor.app
 ```
 
 ## Unsigned Windows Build
@@ -32,5 +32,5 @@ The Windows build is unsigned. If distributed as a zip, unblock the downloaded
 archive before extracting:
 
 ```powershell
-Unblock-File .\LiljaMasterDataEditor-windows-x64.zip
+Unblock-File .\MasterDataEditor-windows-x64.zip
 ```

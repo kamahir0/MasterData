@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "MasterDataConverter")]
-#[command(about = "Lilja.MasterData command line tool")]
+#[command(about = "MasterData command line tool")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

@@ -77,7 +77,7 @@ export function AppShell() {
     try {
       const selected = await open({
         directory: false,
-        filters: [{ name: "Lilja.MasterData Project Settings", extensions: ["yaml", "yml"] }],
+        filters: [{ name: "MasterData Project Settings", extensions: ["yaml", "yml"] }],
         multiple: false,
         title: "Open project-settings.yaml"
       });
@@ -96,7 +96,7 @@ export function AppShell() {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: "Create Lilja.MasterData Project"
+        title: "Create MasterData Project"
       });
       if (typeof selected === "string") {
         await createProject(selected);
@@ -295,7 +295,7 @@ export function AppShell() {
         />
         <div className="brand">
           <Database size={18} />
-          <span>Lilja.MasterData Editor</span>
+          <span>MasterData Editor</span>
         </div>
         <div className="toolbar">
           <IconButton label="Undo" onClick={() => void undo()} icon={<Undo2 size={16} />} />
@@ -398,7 +398,7 @@ function WelcomePage({
     <div className="welcome-page">
       <div className="welcome-card">
         <Database size={38} />
-        <h1>Lilja.MasterData Editor</h1>
+        <h1>MasterData Editor</h1>
         <p>Open the project root containing project-settings.yaml.</p>
         <div className="welcome-actions">
           <button className="primary-action" onClick={() => void onNewProject()} disabled={isBusy}>

@@ -14,7 +14,7 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-const DEFAULT_RELEASE_BASE_URL: &str = "https://github.com/kamahir0/Lilja/releases/download";
+const DEFAULT_RELEASE_BASE_URL: &str = "https://github.com/kamahir0/MasterData/releases/download";
 
 const CONVERTER_ASSETS: &[(&str, &str)] = &[
     ("windows-x64", "MasterDataConverter-windows-x64.exe"),
@@ -25,7 +25,7 @@ const CONVERTER_ASSETS: &[(&str, &str)] = &[
 
 #[derive(Debug, Parser)]
 #[command(name = "MasterDataInit")]
-#[command(about = "Lilja.MasterData project initializer")]
+#[command(about = "MasterData project initializer")]
 struct Cli {
     #[arg(default_value = ".")]
     project: PathBuf,

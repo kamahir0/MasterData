@@ -1,12 +1,12 @@
-# Lilja.MasterData 詰まりポイントメモ
+# MasterData 詰まりポイントメモ
 
-このメモは、Lilja.MasterData と Tauri エディタの設計・実装について、これまでの議論で特に詰まった点、判断に時間がかかった点、後から読み返すべき注意点をまとめたもの。
+このメモは、MasterData と Tauri エディタの設計・実装について、これまでの議論で特に詰まった点、判断に時間がかかった点、後から読み返すべき注意点をまとめたもの。
 
 仕様書や README は「使い方」「完成形」を説明する文書で、このメモは「なぜそうなったか」「同じところで再び迷わないための記録」を目的にする。
 
 ## 全体像
 
-Lilja.MasterData は、Unity ゲーム向けのマスターデータを YAML で管理し、C# 型定義と MasterMemory バイナリを生成するためのツール群。
+MasterData は、Unity ゲーム向けのマスターデータを YAML で管理し、C# 型定義と MasterMemory バイナリを生成するためのツール群。
 
 大きく分けると、以下の2つに分かれる。
 
@@ -21,7 +21,7 @@ Lilja.MasterData は、Unity ゲーム向けのマスターデータを YAML で
 
 ## UPM パッケージではない問題
 
-最初は従来の Lilja パッケージと同じく UPM パッケージ的な見方をしていたが、Lilja.MasterData は Unity 側に置くランタイムコードが極端に薄い、またはゼロになりうる。
+最初は旧モノレポ内のパッケージと同じく UPM パッケージ的な見方をしていたが、MasterData は Unity 側に置くランタイムコードが極端に薄い、またはゼロになりうる。
 
 理由:
 
@@ -81,7 +81,7 @@ Tauri エディタを将来的に作る前提では、Rust に寄せるメリッ
 結論:
 
 - converter バイナリ内に C# ビルダーコードを埋め込む
-- 実行時に `.lilja/temp` などへ展開する
+- 実行時に `.master-data/temp` などへ展開する
 - 生成済み C# 型と一緒に dotnet build/run する
 
 Rust 側では `include_str!` のような形で C# コードを埋め込める。ビルド時の環境変数に C# コード全体を持つ、というより、ソースファイルとして repository に置いたものを Rust バイナリへ埋め込む方が自然。
@@ -327,14 +327,14 @@ repo/
 
 Rust/Cargo や editor build により、差分ファイルが大量に出る問題があった。
 
-Unity の `.gitignore` をそのまま持ってくるのではなく、Lilja.MasterData パッケージ専用の過不足ない `.gitignore` が必要になった。
+Unity の `.gitignore` をそのまま持ってくるのではなく、MasterData パッケージ専用の過不足ない `.gitignore` が必要になった。
 
 無視すべきもの:
 
 - `target/`
 - editor frontend build 出力
 - node_modules
-- 一時生成 `.lilja/temp`
+- 一時生成 `.master-data/temp`
 - OS メタファイル
 
 ただし、テンプレートや embedded builder など、パッケージに必要なソースは無視しない。
@@ -572,7 +572,7 @@ macOS:
 - 初回だけ quarantine 解除が必要
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/LiljaMasterDataEditor.app
+xattr -dr com.apple.quarantine /Applications/MasterData Editor.app
 ```
 
 Windows:
@@ -581,7 +581,7 @@ Windows:
 - SmartScreen やブロック解除が必要な場合がある
 
 ```powershell
-Unblock-File .\LiljaMasterDataEditor-windows-x64.zip
+Unblock-File .\MasterDataEditor-windows-x64.zip
 ```
 
 使うだけの人に npm 依存はない。配布済みアプリを使うだけなら frontend build は同梱される。ただし MasterMemory build を実行するなら `dotnet` は必要。
@@ -701,18 +701,18 @@ Unity6.4Sandbox 側に `Assets/MasterDataTest/masterdata~` を作り、実ユー
 
 ## Git submodule push 問題
 
-`unity-sandbox.git` へ push しようとした時に、submodule `lilja` の変更が remote に存在しないため push が abort した。
+`unity-sandbox.git` へ push しようとした時に、旧サブモジュール の変更が remote に存在しないため push が abort した。
 
 エラー:
 
 ```text
 The following submodule paths contain changes that can not be found on any remote:
-  lilja
+  old-master-data-submodule
 ```
 
 対処:
 
-- 先に submodule 側 `lilja` を push する
+- 先に 旧サブモジュール側 を push する
 - または `git push --recurse-submodules=on-demand`
 
 親 repo だけ push しても、submodule commit が remote にないと壊れる。
@@ -775,7 +775,7 @@ The following submodule paths contain changes that can not be found on any remot
 
 ## 最終的な設計判断の要約
 
-- Lilja.MasterData は Unity runtime package というより外部 masterdata tool
+- MasterData は Unity runtime package というより外部 masterdata tool
 - ユーザーが叩く入口は Rust 製 converter バイナリ
 - MasterMemory build では生成 C# 型を含めた一時 C# project を毎回 dotnet でコンパイル
 - YAML rows は `data/meta` 分離必須

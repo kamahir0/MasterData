@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lilja MasterData Editor",
+  "productName": "MasterData Editor",
   "version": "0.1.0",
-  "identifier": "com.kamahir0.lilja.masterdata.editor",
+  "identifier": "com.kamahir0.masterdata.editor",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Lilja.MasterData Editor",
+        "title": "MasterData Editor",
         "width": 1440,
         "height": 900,
         "minWidth": 1360,

@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
-    <DefineConstants>$(DefineConstants);LILJA_MASTERDATA_BUILD</DefineConstants>
+    <DefineConstants>$(DefineConstants);MASTER_DATA_BUILD</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

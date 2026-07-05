@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using MasterMemory;
 
-namespace Lilja.MasterData.GeneratedBuilder;
+namespace MasterData.GeneratedBuilder;
 
 public static class MasterMemoryBinaryBuilder
 {
