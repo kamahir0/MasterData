@@ -184,7 +184,10 @@ jobs:
         working-directory: apps/editor
         run: npm ci
       - name: Install DMG builder
-        run: python3 -m pip install --user dmgbuild==1.6.5
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmgbuild-venv"
+          "$RUNNER_TEMP/dmgbuild-venv/bin/python" -m pip install dmgbuild==1.6.5
+          echo "DMGBUILD_PYTHON=$RUNNER_TEMP/dmgbuild-venv/bin/python" >> "$GITHUB_ENV"
       - name: Build unsigned app bundle
         working-directory: apps/editor
         run: npm run tauri:build -- --target "${{ matrix.target }}" --bundles app

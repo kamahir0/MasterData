@@ -9,6 +9,7 @@ fi
 app_path="$1"
 output_dmg="$2"
 volume_name="MasterData Editor"
+python_bin="${DMGBUILD_PYTHON:-python3}"
 
 if [ ! -d "$app_path" ]; then
   echo "app bundle not found: $app_path" >&2
@@ -22,7 +23,7 @@ cleanup() {
 trap cleanup EXIT
 
 settings="$workdir/dmgbuild.json"
-python3 - "$settings" "$app_path" <<'PY'
+"$python_bin" - "$settings" "$app_path" <<'PY'
 import json
 import os
 import sys
@@ -66,7 +67,7 @@ PY
 
 mkdir -p "$(dirname "$output_dmg")"
 rm -f "$output_dmg"
-python3 -m dmgbuild \
+"$python_bin" -m dmgbuild \
   --settings "$settings" \
   "$volume_name" \
   "$output_dmg"
