@@ -1,0 +1,168 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - id: version
+        name: Validate tag and workspace version
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import sys
+          import tomllib
+
+          with open("Cargo.toml", "rb") as file:
+              cargo = tomllib.load(file)
+
+          version = cargo["workspace"]["package"]["version"]
+          if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
+              tag = os.environ["INPUT_TAG"]
+          else:
+              ref = os.environ["GITHUB_REF"]
+              if not ref.startswith("refs/tags/"):
+                  raise SystemExit(f"release workflow must run from a tag, got {ref}")
+              tag = os.environ["GITHUB_REF_NAME"]
+
+          expected = f"v{version}"
+          if tag != expected:
+              raise SystemExit(f"release tag {tag} must match workspace version {expected}")
+
+          print(f"version={version}")
+          print(f"tag={tag}")
+          PY
+      - name: Build CLI crates
+        run: cargo build --locked -p master_data_init -p master_data_converter
+      - name: Test CLI/core crates
+        run: cargo test --locked -p master_data_core -p master_data_init -p master_data_converter
+
+  build-cli:
+    name: Build ${{ matrix.platform }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            exe: ""
+          - platform: windows-x64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+            exe: ".exe"
+          - platform: osx-arm64
+            os: macos-26
+            target: aarch64-apple-darwin
+            exe: ""
+          - platform: osx-x64
+            os: macos-26-intel
+            target: x86_64-apple-darwin
+            exe: ""
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - name: Install Rust stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install Rust target
+        shell: bash
+        run: rustup target add "${{ matrix.target }}"
+      - name: Build release binaries
+        shell: bash
+        run: |
+          cargo build --locked --release \
+            --target "${{ matrix.target }}" \
+            -p master_data_init \
+            -p master_data_converter
+      - name: Package binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "dist/${{ matrix.platform }}"
+          cp "target/${{ matrix.target }}/release/MasterDataInit${{ matrix.exe }}" \
+            "dist/${{ matrix.platform }}/MasterDataInit-${{ matrix.platform }}${{ matrix.exe }}"
+          cp "target/${{ matrix.target }}/release/MasterDataConverter${{ matrix.exe }}" \
+            "dist/${{ matrix.platform }}/MasterDataConverter-${{ matrix.platform }}${{ matrix.exe }}"
+          if [ -z "${{ matrix.exe }}" ]; then
+            chmod +x "dist/${{ matrix.platform }}/MasterDataInit-${{ matrix.platform }}"
+            chmod +x "dist/${{ matrix.platform }}/MasterDataConverter-${{ matrix.platform }}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}
+          path: dist/${{ matrix.platform }}/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - validate
+      - build-cli
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: dist
+          merge-multiple: true
+      - name: Generate manifest and checksums
+        run: python3 tools/release/write-release-metadata.py "${{ needs.validate.outputs.version }}" dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --generate-notes \
+              --verify-tag
+          fi

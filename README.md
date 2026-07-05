@@ -73,6 +73,19 @@ checksums.txt
 `MasterDataInit` downloads converter assets from the same release version,
 verifies SHA-256 checksums, and writes them into `Converter/`.
 
+Releases are automated by GitHub Actions. Push a tag that exactly matches the
+workspace package version:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow builds the CLI artifacts on GitHub-hosted Linux, Windows,
+and macOS runners, then creates or updates the GitHub Release with the binaries,
+`manifest.json`, and `checksums.txt`. The workflow can also be rerun manually
+from an existing tag.
+
 ## Intended Repository Layout
 
 Recommended monorepo layout:
