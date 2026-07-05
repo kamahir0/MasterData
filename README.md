@@ -119,10 +119,15 @@ repo/
 対象 platform の init バイナリを実行します。
 
 ```bash
-MasterDataInit-osx-arm64 ./masterdata
-MasterDataInit-osx-arm64 ./masterdata --force
-MasterDataInit-osx-arm64 ./masterdata --no-download
+chmod +x ./MasterDataInit-osx-arm64
+./MasterDataInit-osx-arm64 ./masterdata
+./MasterDataInit-osx-arm64 ./masterdata --force
+./MasterDataInit-osx-arm64 ./masterdata --no-download
 ```
+
+macOS/Linux では、GitHub Release から直接ダウンロードしたバイナリに実行権限が付いていない
+場合があります。その場合は、初回だけ `chmod +x ./MasterDataInit-osx-arm64` のように
+実行権限を付けてください。
 
 `MasterDataInit` はターミナルから実行された場合、対話形式で C# namespace、
 YAML 入力ディレクトリ、ローカル出力先、Unity 同期先を質問します。非対話環境では
