@@ -38,6 +38,8 @@ trap cleanup EXIT
 
 test -d "$mount_point/MasterData Editor.app"
 test -L "$mount_point/Applications"
+test -f "$mount_point/.DS_Store"
+test -f "$mount_point/.background.tiff"
 
 if [ -e "$mount_point/.VolumeIcon.icns" ]; then
   echo ".VolumeIcon.icns must not be packaged" >&2
