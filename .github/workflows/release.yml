@@ -183,19 +183,26 @@ jobs:
       - name: Install editor dependencies
         working-directory: apps/editor
         run: npm ci
-      - name: Build unsigned DMG
+      - name: Build unsigned app bundle
         working-directory: apps/editor
-        run: npm run tauri:build -- --target "${{ matrix.target }}" --bundles dmg
-      - name: Package DMG
+        run: npm run tauri:build -- --target "${{ matrix.target }}" --bundles app
+      - name: Package unsigned DMG
         run: |
           set -euo pipefail
           mkdir -p "dist/editor-${{ matrix.platform }}"
-          dmg="$(find target -path '*/release/bundle/dmg/*.dmg' -type f | sort | head -n 1)"
-          if [ -z "$dmg" ]; then
-            echo "::error title=Missing DMG::Tauri did not produce a macOS DMG"
+          app="$(find target -path '*/release/bundle/macos/MasterData Editor.app' -type d | sort | head -n 1)"
+          if [ -z "$app" ]; then
+            echo "::error title=Missing app bundle::Tauri did not produce a macOS app bundle"
             exit 1
           fi
-          cp "$dmg" "dist/editor-${{ matrix.platform }}/MasterDataEditor-${{ matrix.platform }}.dmg"
+          tools/release/create-macos-dmg.sh \
+            "$app" \
+            "dist/editor-${{ matrix.platform }}/MasterDataEditor-${{ matrix.platform }}.dmg"
+      - name: Verify DMG contents
+        run: |
+          set -euo pipefail
+          tools/release/verify-macos-dmg.sh \
+            "dist/editor-${{ matrix.platform }}/MasterDataEditor-${{ matrix.platform }}.dmg"
       - uses: actions/upload-artifact@v7
         with:
           name: editor-${{ matrix.platform }}
