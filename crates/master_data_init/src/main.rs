@@ -14,7 +14,9 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-const DEFAULT_RELEASE_BASE_URL: &str = "https://github.com/kamahir0/MasterData/releases/download";
+const DEFAULT_RELEASE_API_URL: &str =
+    "https://api.github.com/repos/kamahir0/MasterData/releases/tags";
+const GITHUB_API_VERSION: &str = "2026-03-10";
 
 const CONVERTER_ASSETS: &[(&str, &str)] = &[
     ("windows-x64", "MasterDataConverter-windows-x64.exe"),
@@ -35,22 +37,22 @@ struct Cli {
     no_download: bool,
     #[arg(long)]
     yes: bool,
-    #[arg(long, default_value = DEFAULT_RELEASE_BASE_URL)]
-    release_base_url: String,
+    #[arg(long, default_value = DEFAULT_RELEASE_API_URL)]
+    release_api_url: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReleaseManifest {
-    version: String,
-    converters: BTreeMap<String, ReleaseAsset>,
+struct GitHubRelease {
+    tag_name: String,
+    assets: Vec<GitHubReleaseAsset>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReleaseAsset {
-    file: String,
-    sha256: Option<String>,
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+    digest: Option<String>,
+    state: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -73,7 +75,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    download_converters(&root, &cli.release_base_url, TOOL_VERSION)?;
+    download_converters(&root, &cli.release_api_url, TOOL_VERSION)?;
     println!("converter download succeeded");
     Ok(())
 }
@@ -186,22 +188,20 @@ fn prompt_bool(label: &str, default: bool) -> Result<bool> {
     }
 }
 
-fn download_converters(root: &Path, release_base_url: &str, version: &str) -> Result<()> {
-    let release_base = release_version_url(release_base_url, version);
-    let manifest_url = format!("{release_base}/manifest.json");
-    let checksums_url = format!("{release_base}/checksums.txt");
-    let manifest_text = download_text(&manifest_url)?;
-    let manifest: ReleaseManifest =
-        serde_json::from_str(&manifest_text).with_context(|| "failed to parse manifest.json")?;
-    if manifest.version != version {
+fn download_converters(root: &Path, release_api_url: &str, version: &str) -> Result<()> {
+    let expected_tag = release_tag(version);
+    let release_text = download_json_text(&release_version_api_url(release_api_url, version)?)?;
+    let release: GitHubRelease =
+        serde_json::from_str(&release_text).with_context(|| "failed to parse release metadata")?;
+    if release.tag_name != expected_tag {
         anyhow::bail!(
-            "release manifest version {} does not match init version {}",
-            manifest.version,
-            version
+            "release tag {} does not match init version {}",
+            release.tag_name,
+            expected_tag
         );
     }
 
-    let checksums = parse_checksums(&download_text(&checksums_url)?);
+    let assets = release_asset_map(&release.assets)?;
     let converter_dir = root.join("Converter");
     fs::create_dir_all(&converter_dir).with_context(|| {
         format!(
@@ -210,26 +210,22 @@ fn download_converters(root: &Path, release_base_url: &str, version: &str) -> Re
         )
     })?;
 
-    for (platform, default_file) in CONVERTER_ASSETS {
-        let asset = manifest
-            .converters
-            .get(*platform)
-            .with_context(|| format!("manifest is missing converter asset `{platform}`"))?;
-        let file_name = if asset.file.is_empty() {
-            *default_file
-        } else {
-            asset.file.as_str()
-        };
-        let expected_sha = asset
-            .sha256
-            .as_deref()
-            .or_else(|| checksums.get(file_name).map(String::as_str))
-            .with_context(|| format!("checksum was not found for {file_name}"))?;
-        let bytes = download_bytes(&format!("{release_base}/{file_name}"))?;
+    for (_, file_name) in CONVERTER_ASSETS {
+        let asset = assets
+            .get(*file_name)
+            .with_context(|| format!("release is missing converter asset `{file_name}`"))?;
+        if let Some(state) = asset.state.as_deref() {
+            if state != "uploaded" {
+                anyhow::bail!("release asset {file_name} is in `{state}` state");
+            }
+        }
+        let expected_sha = sha256_from_digest(asset.digest.as_deref())
+            .with_context(|| format!("sha256 digest was not found for {file_name}"))?;
+        let bytes = download_bytes(&asset.browser_download_url)?;
         verify_sha256(&bytes, expected_sha)
             .with_context(|| format!("checksum mismatch for {file_name}"))?;
 
-        let destination = converter_dir.join(file_name);
+        let destination = converter_dir.join(*file_name);
         fs::write(&destination, bytes)
             .with_context(|| format!("failed to write {}", destination.display()))?;
         make_executable(&destination)?;
@@ -238,17 +234,39 @@ fn download_converters(root: &Path, release_base_url: &str, version: &str) -> Re
     Ok(())
 }
 
-fn release_version_url(base_url: &str, version: &str) -> String {
-    let tag = if version.starts_with('v') {
+fn release_tag(version: &str) -> String {
+    if version.starts_with('v') {
         version.to_string()
     } else {
         format!("v{version}")
-    };
-    format!("{}/{}", base_url.trim_end_matches('/'), tag)
+    }
 }
 
-fn download_text(url: &str) -> Result<String> {
+fn release_version_api_url(base_url: &str, version: &str) -> Result<String> {
+    let tag = release_tag(version);
+    if tag.contains('/') || tag.contains('\\') {
+        anyhow::bail!("invalid release tag: {tag}");
+    }
+    Ok(format!("{}/{}", base_url.trim_end_matches('/'), tag))
+}
+
+fn release_asset_map<'a>(
+    assets: &'a [GitHubReleaseAsset],
+) -> Result<BTreeMap<&'a str, &'a GitHubReleaseAsset>> {
+    let mut map = BTreeMap::new();
+    for asset in assets {
+        if map.insert(asset.name.as_str(), asset).is_some() {
+            anyhow::bail!("release has duplicate asset: {}", asset.name);
+        }
+    }
+    Ok(map)
+}
+
+fn download_json_text(url: &str) -> Result<String> {
     let response = ureq::get(url)
+        .set("Accept", "application/vnd.github+json")
+        .set("X-GitHub-Api-Version", GITHUB_API_VERSION)
+        .set("User-Agent", "MasterDataInit")
         .call()
         .with_context(|| format!("failed to download {url}"))?;
     response
@@ -258,6 +276,7 @@ fn download_text(url: &str) -> Result<String> {
 
 fn download_bytes(url: &str) -> Result<Vec<u8>> {
     let response = ureq::get(url)
+        .set("User-Agent", "MasterDataInit")
         .call()
         .with_context(|| format!("failed to download {url}"))?;
     let mut reader = response.into_reader();
@@ -268,19 +287,8 @@ fn download_bytes(url: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn parse_checksums(text: &str) -> BTreeMap<String, String> {
-    text.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                return None;
-            }
-            let mut parts = line.split_whitespace();
-            let checksum = parts.next()?;
-            let file = parts.next()?.trim_start_matches('*');
-            Some((file.to_string(), checksum.to_string()))
-        })
-        .collect()
+fn sha256_from_digest(digest: Option<&str>) -> Option<&str> {
+    digest?.strip_prefix("sha256:")
 }
 
 fn verify_sha256(bytes: &[u8], expected_hex: &str) -> Result<()> {
@@ -312,22 +320,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_checksums() {
-        let checksums = parse_checksums(
-            "\
-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  MasterDataConverter-osx-arm64
-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *MasterDataConverter-linux-x64
-",
-        );
-
+    fn extracts_sha256_from_digest() {
         assert_eq!(
-            checksums.get("MasterDataConverter-osx-arm64").unwrap(),
+            sha256_from_digest(Some(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ))
+            .unwrap(),
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         );
-        assert_eq!(
-            checksums.get("MasterDataConverter-linux-x64").unwrap(),
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        );
+        assert!(sha256_from_digest(Some("sha512:abc")).is_none());
+        assert!(sha256_from_digest(None).is_none());
     }
 
     #[test]
@@ -344,14 +346,42 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *MasterDataConv
     }
 
     #[test]
-    fn builds_release_version_url() {
+    fn builds_release_version_api_url() {
         assert_eq!(
-            release_version_url("https://example.test/releases/download", "0.1.0"),
-            "https://example.test/releases/download/v0.1.0"
+            release_version_api_url("https://api.example.test/releases/tags", "0.1.0").unwrap(),
+            "https://api.example.test/releases/tags/v0.1.0"
         );
         assert_eq!(
-            release_version_url("https://example.test/releases/download/", "v0.1.0"),
-            "https://example.test/releases/download/v0.1.0"
+            release_version_api_url("https://api.example.test/releases/tags/", "v0.1.0").unwrap(),
+            "https://api.example.test/releases/tags/v0.1.0"
         );
+    }
+
+    #[test]
+    fn rejects_path_like_release_tags() {
+        assert!(
+            release_version_api_url("https://api.example.test/releases/tags", "v0.1.0/foo")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_release_assets() {
+        let assets = vec![
+            GitHubReleaseAsset {
+                name: "MasterDataConverter-osx-arm64".to_string(),
+                browser_download_url: "https://example.test/a".to_string(),
+                digest: None,
+                state: Some("uploaded".to_string()),
+            },
+            GitHubReleaseAsset {
+                name: "MasterDataConverter-osx-arm64".to_string(),
+                browser_download_url: "https://example.test/b".to_string(),
+                digest: None,
+                state: Some("uploaded".to_string()),
+            },
+        ];
+
+        assert!(release_asset_map(&assets).is_err());
     }
 }

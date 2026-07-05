@@ -52,8 +52,7 @@ machine.
 
 ## Release Artifacts
 
-Each release should publish init binaries, converter binaries, and integrity
-metadata:
+Each release should publish only the user-facing init and converter binaries:
 
 ```text
 MasterDataInit-windows-x64.exe
@@ -65,13 +64,11 @@ MasterDataConverter-windows-x64.exe
 MasterDataConverter-osx-arm64
 MasterDataConverter-osx-x64
 MasterDataConverter-linux-x64
-
-manifest.json
-checksums.txt
 ```
 
-`MasterDataInit` downloads converter assets from the same release version,
-verifies SHA-256 checksums, and writes them into `Converter/`.
+`MasterDataInit` reads the GitHub Release asset list through the GitHub API,
+downloads converter assets from the same release version, verifies GitHub's
+SHA-256 asset digests, and writes them into `Converter/`.
 
 Releases are automated by GitHub Actions. Push a tag that exactly matches the
 workspace package version:
@@ -82,9 +79,8 @@ git push origin v0.1.0
 ```
 
 The release workflow builds the CLI artifacts on GitHub-hosted Linux, Windows,
-and macOS runners, then creates or updates the GitHub Release with the binaries,
-`manifest.json`, and `checksums.txt`. The workflow can also be rerun manually
-from an existing tag.
+and macOS runners, then creates or updates the GitHub Release with the binaries.
+The workflow can also be rerun manually from an existing tag.
 
 ## Intended Repository Layout
 
