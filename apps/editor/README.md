@@ -41,18 +41,21 @@ npm run tauri:build:dev
 
 ## Unsigned macOS Build
 
-This app is intended for developer use and is not notarized. After copying the
-app to `/Applications`, run once:
+Release builds are distributed as unsigned `.dmg` files. Open the `.dmg`, drag
+`MasterData Editor.app` into `Applications`, then run once if Gatekeeper blocks
+the first launch:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/MasterData Editor.app
+xattr -dr com.apple.quarantine "/Applications/MasterData Editor.app"
+open "/Applications/MasterData Editor.app"
 ```
 
 ## Unsigned Windows Build
 
-The Windows build is unsigned. If distributed as a zip, unblock the downloaded
-archive before extracting:
+Release builds are distributed as an unsigned NSIS setup executable and an
+optional portable zip. If using the portable zip, unblock the downloaded archive
+before extracting:
 
 ```powershell
-Unblock-File .\MasterDataEditor-windows-x64.zip
+Unblock-File .\MasterDataEditor-windows-x64-portable.zip
 ```

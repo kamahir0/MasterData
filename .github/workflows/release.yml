@@ -151,11 +151,123 @@ jobs:
           path: dist/${{ matrix.platform }}/*
           if-no-files-found: error
 
+  build-editor-macos:
+    name: Build Editor ${{ matrix.platform }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            os: macos-26
+            target: aarch64-apple-darwin
+          - platform: macos-x64
+            os: macos-26-intel
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install Rust target
+        run: rustup target add "${{ matrix.target }}"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/editor/package-lock.json
+      - name: Install editor dependencies
+        working-directory: apps/editor
+        run: npm ci
+      - name: Build unsigned DMG
+        working-directory: apps/editor
+        run: npm run tauri:build -- --target "${{ matrix.target }}" --bundles dmg
+      - name: Package DMG
+        run: |
+          set -euo pipefail
+          mkdir -p "dist/editor-${{ matrix.platform }}"
+          dmg="$(find target -path '*/release/bundle/dmg/*.dmg' -type f | sort | head -n 1)"
+          if [ -z "$dmg" ]; then
+            echo "::error title=Missing DMG::Tauri did not produce a macOS DMG"
+            exit 1
+          fi
+          cp "$dmg" "dist/editor-${{ matrix.platform }}/MasterDataEditor-${{ matrix.platform }}.dmg"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: editor-${{ matrix.platform }}
+          path: dist/editor-${{ matrix.platform }}/*
+          if-no-files-found: error
+
+  build-editor-windows:
+    name: Build Editor windows-x64
+    needs: validate
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - name: Install Rust stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install Rust target
+        shell: bash
+        run: rustup target add x86_64-pc-windows-msvc
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/editor/package-lock.json
+      - name: Install editor dependencies
+        working-directory: apps/editor
+        run: npm ci
+      - name: Build unsigned NSIS installer
+        working-directory: apps/editor
+        run: npm run tauri:build -- --target x86_64-pc-windows-msvc --bundles nsis
+      - name: Package installer and portable zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "dist/editor-windows-x64" | Out-Null
+
+          $Installer = Get-ChildItem -Path "target" -Recurse -File -Filter "*.exe" |
+            Where-Object { $_.FullName -match "\\bundle\\nsis\\" -and $_.Name -match "setup" } |
+            Sort-Object FullName |
+            Select-Object -First 1
+          if (-not $Installer) {
+            throw "Tauri did not produce a Windows NSIS setup executable."
+          }
+          Copy-Item $Installer.FullName "dist/editor-windows-x64/MasterDataEditor-windows-x64-setup.exe"
+
+          $PortableExe = "target/x86_64-pc-windows-msvc/release/master_data_editor.exe"
+          if (-not (Test-Path $PortableExe)) {
+            throw "Release executable was not found: $PortableExe"
+          }
+          New-Item -ItemType Directory -Force -Path "dist/editor-windows-x64/portable" | Out-Null
+          Copy-Item $PortableExe "dist/editor-windows-x64/portable/MasterDataEditor.exe"
+          Compress-Archive `
+            -Path "dist/editor-windows-x64/portable/MasterDataEditor.exe" `
+            -DestinationPath "dist/editor-windows-x64/MasterDataEditor-windows-x64-portable.zip" `
+            -Force
+          Remove-Item -Recurse -Force "dist/editor-windows-x64/portable"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: editor-windows-x64
+          path: dist/editor-windows-x64/*
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
     needs:
       - validate
       - build-cli
+      - build-editor-macos
+      - build-editor-windows
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -166,6 +278,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           pattern: cli-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: editor-*
           path: dist
           merge-multiple: true
       - name: Publish release

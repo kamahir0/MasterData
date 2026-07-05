@@ -52,7 +52,9 @@ docs/
 
 ## リリース成果物
 
-各リリースでは、利用者が直接使う init バイナリと converter バイナリだけを公開します。
+各リリースでは、CLI ツールと Desktop Editor を公開します。
+
+CLI ツール:
 
 ```text
 MasterDataInit-windows-x64.exe
@@ -66,9 +68,36 @@ MasterDataConverter-osx-x64
 MasterDataConverter-linux-x64
 ```
 
+Desktop Editor:
+
+```text
+MasterDataEditor-macos-arm64.dmg
+MasterDataEditor-macos-x64.dmg
+MasterDataEditor-windows-x64-setup.exe
+MasterDataEditor-windows-x64-portable.zip
+```
+
 `MasterDataInit` は GitHub API 経由で GitHub Release の asset 一覧を読み、
 同じリリースバージョンから converter asset をダウンロードします。GitHub が返す
 SHA-256 asset digest を検証したうえで、`converter/` に書き込みます。
+
+### Desktop Editor のインストール
+
+Desktop Editor は無料配布を前提にしているため、macOS の Developer ID 署名と
+notarization は行いません。Windows 版も code signing は行いません。
+
+macOS では `.dmg` を開き、`MasterData Editor.app` を `Applications` へドラッグして
+インストールします。初回起動時に Gatekeeper でブロックされる場合は、信頼できる
+GitHub Release から取得したことを確認したうえで、次を実行してください。
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/MasterData Editor.app"
+open "/Applications/MasterData Editor.app"
+```
+
+Windows では通常は `MasterDataEditor-windows-x64-setup.exe` を使います。
+インストールせずに使いたい場合は `MasterDataEditor-windows-x64-portable.zip` を展開して
+実行できます。どちらも未署名のため、SmartScreen や「発行元不明」の警告が出る場合があります。
 
 リリースは GitHub Actions で自動化されています。手動で tag を push する場合は、
 workspace package version と完全に一致する tag を使います。
