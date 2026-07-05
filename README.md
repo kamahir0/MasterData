@@ -120,6 +120,7 @@ repo/
 
 ```bash
 chmod +x ./MasterDataInit-osx-arm64
+xattr -d com.apple.quarantine ./MasterDataInit-osx-arm64
 ./MasterDataInit-osx-arm64 ./masterdata
 ./MasterDataInit-osx-arm64 ./masterdata --force
 ./MasterDataInit-osx-arm64 ./masterdata --no-download
@@ -128,6 +129,11 @@ chmod +x ./MasterDataInit-osx-arm64
 macOS/Linux では、GitHub Release から直接ダウンロードしたバイナリに実行権限が付いていない
 場合があります。その場合は、初回だけ `chmod +x ./MasterDataInit-osx-arm64` のように
 実行権限を付けてください。
+
+macOS で「Apple はマルウェアが含まれていないことを検証できませんでした」と表示され、
+`zsh: killed` で終了する場合は、Gatekeeper の quarantine 属性でブロックされています。
+信頼できるリリースから取得したバイナリであることを確認したうえで、初回だけ
+`xattr -d com.apple.quarantine ./MasterDataInit-osx-arm64` を実行してください。
 
 `MasterDataInit` はターミナルから実行された場合、対話形式で C# namespace、
 YAML 入力ディレクトリ、ローカル出力先、Unity 同期先を質問します。非対話環境では
