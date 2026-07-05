@@ -29,7 +29,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
       - name: Install Rust stable
@@ -95,7 +95,7 @@ jobs:
             target: x86_64-apple-darwin
             exe: ""
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.tag }}
       - name: Install Rust stable
@@ -141,7 +141,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.tag }}
       - uses: actions/download-artifact@v4
