@@ -14,11 +14,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const BUILDER_CSPROJ: &str =
-    include_str!("../../../embedded/builder/MasterData.GeneratedBuilder.csproj");
-const BUILDER_PROGRAM: &str = include_str!("../../../embedded/builder/Program.cs");
-const BUILDER_INPUT: &str = include_str!("../../../embedded/builder/Builder/BuildInput.cs");
+    include_str!("../assets/builder/MasterData.GeneratedBuilder.csproj");
+const BUILDER_PROGRAM: &str = include_str!("../assets/builder/Program.cs");
+const BUILDER_INPUT: &str = include_str!("../assets/builder/Builder/BuildInput.cs");
 const BUILDER_BINARY_BUILDER: &str =
-    include_str!("../../../embedded/builder/Builder/MasterMemoryBinaryBuilder.cs");
+    include_str!("../assets/builder/Builder/MasterMemoryBinaryBuilder.cs");
 
 #[derive(Debug, Clone)]
 pub struct LoadedProject {

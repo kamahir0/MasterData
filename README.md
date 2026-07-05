@@ -23,6 +23,22 @@ MasterData is split into three layers:
 `MasterDataConverter` no longer provides `init`. Initialization is a separate
 tool so the committed converter can stay focused on reproducible conversion.
 
+## Development Repository Layout
+
+```text
+crates/
+  master_data_core/        Shared model, validation, code generation, and build/sync logic.
+    assets/                Embedded C# builder and built-in C# templates.
+  master_data_converter/   Daily conversion CLI.
+  master_data_init/        Project initializer CLI.
+
+apps/
+  editor/                  Tauri-based visual editor.
+
+docs/
+  architecture-notes.md    Design notes and implementation tradeoffs.
+```
+
 ## Requirements
 
 - .NET SDK available as `dotnet`

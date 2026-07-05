@@ -9,10 +9,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const BUILTIN_TABLE_TEMPLATE: &str =
-    include_str!("../../../embedded/templates/csharp/table.cs.tpl");
+    include_str!("../assets/templates/csharp/table.cs.tpl");
 const BUILTIN_STRUCT_TEMPLATE: &str =
-    include_str!("../../../embedded/templates/csharp/struct.cs.tpl");
-const BUILTIN_ENUM_TEMPLATE: &str = include_str!("../../../embedded/templates/csharp/enum.cs.tpl");
+    include_str!("../assets/templates/csharp/struct.cs.tpl");
+const BUILTIN_ENUM_TEMPLATE: &str = include_str!("../assets/templates/csharp/enum.cs.tpl");
 
 #[derive(Debug, Clone)]
 pub struct GeneratedFile {

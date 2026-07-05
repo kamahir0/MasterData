@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "apps/master_data_editor/src-tauri",
+    "apps/editor/src-tauri",
     "crates/master_data_core",
     "crates/master_data_converter",
     "crates/master_data_init",
