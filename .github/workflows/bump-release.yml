@@ -79,6 +79,7 @@ jobs:
           git add \
             Cargo.toml \
             Cargo.lock \
+            README.md \
             apps/editor/package.json \
             apps/editor/package-lock.json \
             apps/editor/src-tauri/tauri.conf.json

@@ -114,6 +114,15 @@ def update_json_versions(
     path.write_text(text, encoding="utf-8")
 
 
+def replace_text_once(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: expected exactly one occurrence of {old!r}, found {count}")
+
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
 def write_outputs(path: Optional[str], values: Dict[str, str]) -> None:
     for key, value in values.items():
         print(f"{key}={value}")
@@ -160,6 +169,11 @@ def main() -> None:
             current,
             next_version,
             [("version",)],
+        )
+        replace_text_once(
+            repo / "README.md",
+            f"  version: {current}",
+            f"  version: {next_version}",
         )
 
     write_outputs(args.github_output, values)
