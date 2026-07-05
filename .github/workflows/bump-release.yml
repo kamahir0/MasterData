@@ -1,0 +1,110 @@
+name: Bump Release
+
+run-name: Bump ${{ inputs.level }} release
+
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "Version component to increment"
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: bump-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bump:
+    name: Bump Version, Tag, and Dispatch Release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - id: bump
+        name: Bump version files
+        run: python3 tools/release/bump-version.py "${{ inputs.level }}" --github-output "$GITHUB_OUTPUT"
+      - name: Ensure release tag is unused
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error title=Release tag already exists::${TAG} already exists"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error title=Remote release tag already exists::${TAG} already exists on origin"
+            exit 1
+          fi
+      - name: Refresh lockfiles
+        run: cargo metadata --format-version 1 >/dev/null
+      - name: Validate Rust crates
+        run: cargo test --locked -p master_data_core -p master_data_init -p master_data_converter
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/editor/package-lock.json
+      - name: Validate editor frontend
+        working-directory: apps/editor
+        run: |
+          npm ci
+          npm run build
+      - name: Commit and tag
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          git add \
+            Cargo.toml \
+            Cargo.lock \
+            apps/editor/package.json \
+            apps/editor/package-lock.json \
+            apps/editor/src-tauri/tauri.conf.json
+          if git diff --cached --quiet; then
+            echo "::error title=No version changes::Version bump produced no changes"
+            exit 1
+          fi
+          git commit -m "Release ${TAG}"
+          git tag "${TAG}"
+          git push origin HEAD:main
+          git push origin "${TAG}"
+      - name: Dispatch release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: gh workflow run Release --repo "$GITHUB_REPOSITORY" --ref main -f tag="$TAG"
+      - name: Write summary
+        env:
+          PREVIOUS_VERSION: ${{ steps.bump.outputs.previous_version }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          {
+            echo "### Release bump"
+            echo
+            echo "- ${PREVIOUS_VERSION} -> ${VERSION}"
+            echo "- Tag: ${TAG}"
+            echo "- Release workflow dispatched."
+          } >> "$GITHUB_STEP_SUMMARY"

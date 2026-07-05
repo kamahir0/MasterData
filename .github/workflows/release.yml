@@ -174,13 +174,6 @@ jobs:
           TAG: ${{ needs.validate.outputs.tag }}
         run: |
           set -euo pipefail
-          for asset in manifest.json checksums.txt; do
-            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
-              --jq ".assets[] | select(.name == \"$asset\") | .name" | grep -qx "$asset"; then
-              gh release delete-asset "$TAG" "$asset" --repo "$GITHUB_REPOSITORY" --yes
-            fi
-          done
-
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
           else

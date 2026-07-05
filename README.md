@@ -82,6 +82,11 @@ The release workflow builds the CLI artifacts on GitHub-hosted Linux, Windows,
 and macOS runners, then creates or updates the GitHub Release with the binaries.
 The workflow can also be rerun manually from an existing tag.
 
+For normal releases, run the `Bump Release` workflow from GitHub Actions and
+choose `patch`, `minor`, or `major`. It updates repository version files,
+commits the version bump, creates the matching `vX.Y.Z` tag, and dispatches the
+release workflow automatically.
+
 ## Intended Repository Layout
 
 Recommended monorepo layout:
