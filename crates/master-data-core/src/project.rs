@@ -15,9 +15,9 @@ use std::process::Command;
 
 const BUILDER_CSPROJ: &str = include_str!("../assets/builder/MasterData.GeneratedBuilder.csproj");
 const BUILDER_PROGRAM: &str = include_str!("../assets/builder/Program.cs");
-const BUILDER_INPUT: &str = include_str!("../assets/builder/Builder/BuildInput.cs");
+const BUILDER_INPUT: &str = include_str!("../assets/builder/builder/BuildInput.cs");
 const BUILDER_BINARY_BUILDER: &str =
-    include_str!("../assets/builder/Builder/MasterMemoryBinaryBuilder.cs");
+    include_str!("../assets/builder/builder/MasterMemoryBinaryBuilder.cs");
 
 #[derive(Debug, Clone)]
 pub struct LoadedProject {
@@ -113,7 +113,7 @@ pub fn init_project(root: impl AsRef<Path>, options: &InitProjectOptions) -> Res
     })?;
 
     if options.create_converter_dir {
-        let converter_dir = root.join("Converter");
+        let converter_dir = root.join("converter");
         fs::create_dir_all(&converter_dir).with_context(|| {
             format!(
                 "failed to create converter directory: {}",
@@ -216,9 +216,9 @@ fn expand_builder_project(
     config: &MasterDataConfig,
     files: &[crate::codegen::GeneratedFile],
 ) -> Result<()> {
-    let builder_root = root.join(".master-data/temp/builder");
-    let builder_dir = builder_root.join("Builder");
-    let generated_dir = builder_root.join("Generated");
+    let builder_root = root.join(".master-data/temp/generated-builder");
+    let builder_dir = builder_root.join("builder");
+    let generated_dir = builder_root.join("generated");
 
     fs::create_dir_all(&builder_dir)?;
     fs::create_dir_all(&generated_dir)?;
@@ -254,7 +254,7 @@ fn expand_builder_project(
 }
 
 fn run_dotnet_builder(root: &Path) -> Result<()> {
-    let builder_root = root.join(".master-data/temp/builder");
+    let builder_root = root.join(".master-data/temp/generated-builder");
     let status = Command::new("dotnet")
         .arg("run")
         .arg("--project")
@@ -409,7 +409,7 @@ mod tests {
         assert!(config_text.contains("tool:"));
         assert!(config_text.contains(&format!("version: {TOOL_VERSION}")));
         assert!(root.join("master").is_dir());
-        assert!(root.join("Converter").is_dir());
+        assert!(root.join("converter").is_dir());
 
         fs::remove_dir_all(root).unwrap();
     }

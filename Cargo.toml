@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "apps/editor/src-tauri",
-    "crates/master_data_core",
-    "crates/master_data_converter",
-    "crates/master_data_init",
+    "crates/master-data-core",
+    "crates/master-data-converter",
+    "crates/master-data-init",
 ]
 resolver = "2"
 

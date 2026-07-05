@@ -28,10 +28,10 @@ MasterData は 3 つの層に分かれています。
 
 ```text
 crates/
-  master_data_core/        共有モデル、検証、コード生成、build/sync ロジック。
+  master-data-core/        共有モデル、検証、コード生成、build/sync ロジック。
     assets/                埋め込み C# builder と組み込み C# テンプレート。
-  master_data_converter/   日常利用する変換 CLI。
-  master_data_init/        プロジェクト初期化 CLI。
+  master-data-converter/   日常利用する変換 CLI。
+  master-data-init/        プロジェクト初期化 CLI。
 
 apps/
   editor/                  Tauri ベースのビジュアルエディタ。
@@ -68,7 +68,7 @@ MasterDataConverter-linux-x64
 
 `MasterDataInit` は GitHub API 経由で GitHub Release の asset 一覧を読み、
 同じリリースバージョンから converter asset をダウンロードします。GitHub が返す
-SHA-256 asset digest を検証したうえで、`Converter/` に書き込みます。
+SHA-256 asset digest を検証したうえで、`converter/` に書き込みます。
 
 リリースは GitHub Actions で自動化されています。手動で tag を push する場合は、
 workspace package version と完全に一致する tag を使います。
@@ -90,6 +90,9 @@ version file を更新し、version bump commit を作成し、対応する `vX.
 ## 想定プロジェクト構成
 
 推奨する monorepo 構成です。
+Unity プロジェクト配下は `Assets/MasterData/...` のように PascalCase を使い、
+それ以外の repository / tool 用ディレクトリは `master-data`、`converter`、
+`master-memory` のように kebab-case を標準にします。
 
 ```text
 repo/
@@ -99,12 +102,12 @@ repo/
         Generated/
         Resources/
 
-  masterdata/
+  master-data/
     project-settings.yaml
     master/
       item/
         item_master.yaml
-    Converter/
+    converter/
       MasterDataConverter-windows-x64.exe
       MasterDataConverter-osx-arm64
       MasterDataConverter-osx-x64
@@ -117,13 +120,17 @@ repo/
 ## 初期化
 
 対象 platform の init バイナリを実行します。
+引数を省略した場合は、現在のディレクトリ配下に `master-data/` を作成します。
+現在のディレクトリ自体を project root にしたい場合は、`./MasterDataInit-osx-arm64 .`
+のように `.` を明示します。
 
 ```bash
 chmod +x ./MasterDataInit-osx-arm64
 xattr -d com.apple.quarantine ./MasterDataInit-osx-arm64
-./MasterDataInit-osx-arm64 ./masterdata
-./MasterDataInit-osx-arm64 ./masterdata --force
-./MasterDataInit-osx-arm64 ./masterdata --no-download
+./MasterDataInit-osx-arm64
+./MasterDataInit-osx-arm64 ./master-data
+./MasterDataInit-osx-arm64 ./master-data --force
+./MasterDataInit-osx-arm64 ./master-data --no-download
 ```
 
 macOS/Linux では、GitHub Release から直接ダウンロードしたバイナリに実行権限が付いていない
@@ -140,25 +147,25 @@ YAML 入力ディレクトリ、ローカル出力先、Unity 同期先を質問
 デフォルト値を使います。
 
 `--no-download` を指定すると、converter バイナリをダウンロードせずに
-`project-settings.yaml`、`master/`、`Converter/` だけを作成します。
+`project-settings.yaml`、`master/`、`converter/` だけを作成します。
 
 ## 変換コマンド
 
 日常的な変換では、プロジェクトローカルの converter を使います。
 
 ```bash
-cd masterdata
-./Converter/MasterDataConverter-osx-arm64
-./Converter/MasterDataConverter-osx-arm64 convert
-./Converter/MasterDataConverter-osx-arm64 convert --init
-./Converter/MasterDataConverter-osx-arm64 validate
-./Converter/MasterDataConverter-osx-arm64 validate --profile production
-./Converter/MasterDataConverter-osx-arm64 generate
-./Converter/MasterDataConverter-osx-arm64 build
-./Converter/MasterDataConverter-osx-arm64 build --profile production
-./Converter/MasterDataConverter-osx-arm64 sync
-./Converter/MasterDataConverter-osx-arm64 sync --init
-./Converter/MasterDataConverter-osx-arm64 clean
+cd master-data
+./converter/MasterDataConverter-osx-arm64
+./converter/MasterDataConverter-osx-arm64 convert
+./converter/MasterDataConverter-osx-arm64 convert --init
+./converter/MasterDataConverter-osx-arm64 validate
+./converter/MasterDataConverter-osx-arm64 validate --profile production
+./converter/MasterDataConverter-osx-arm64 generate
+./converter/MasterDataConverter-osx-arm64 build
+./converter/MasterDataConverter-osx-arm64 build --profile production
+./converter/MasterDataConverter-osx-arm64 sync
+./converter/MasterDataConverter-osx-arm64 sync --init
+./converter/MasterDataConverter-osx-arm64 clean
 ```
 
 サブコマンドを省略した場合は `convert` が実行されます。`convert` は `build` を実行し、
@@ -361,7 +368,7 @@ dist/
 
 - `master/` 配下の YAML source
 - `project-settings.yaml`
-- `Converter/MasterDataConverter-{platform}`
+- `converter/MasterDataConverter-{platform}`
 
 同期済みの生成 C# と `.bytes` を commit するかどうかは、各プロジェクトの運用方針です。
 Unity プロジェクトでは、生成 C# と binary asset を commit する運用が実用的なことも多いです。
@@ -374,7 +381,7 @@ Unity プロジェクトでは、生成 C# と binary asset を commit する運
 version: '3'
 
 vars:
-  CONVERTER: ./Converter/MasterDataConverter-osx-arm64
+  CONVERTER: ./converter/MasterDataConverter-osx-arm64
 
 tasks:
   convert:
@@ -416,13 +423,13 @@ cargo build --bin MasterDataConverter
 リリースダウンロードなしで fixture を初期化します。
 
 ```bash
-cargo run --bin MasterDataInit -- /tmp/masterdata --no-download --yes
+cargo run --bin MasterDataInit -- /tmp/master-data --no-download --yes
 ```
 
 master-data project に対して validation を実行します。
 
 ```bash
-cargo run --bin MasterDataConverter -- validate path/to/masterdata
+cargo run --bin MasterDataConverter -- validate path/to/master-data
 ```
 
 check を実行します。

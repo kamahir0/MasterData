@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 const DEFAULT_RELEASE_API_URL: &str =
     "https://api.github.com/repos/kamahir0/MasterData/releases/tags";
 const GITHUB_API_VERSION: &str = "2026-03-10";
+const DEFAULT_PROJECT_DIR: &str = "master-data";
 
 const CONVERTER_ASSETS: &[(&str, &str)] = &[
     ("windows-x64", "MasterDataConverter-windows-x64.exe"),
@@ -29,7 +30,7 @@ const CONVERTER_ASSETS: &[(&str, &str)] = &[
 #[command(name = "MasterDataInit")]
 #[command(about = "MasterData project initializer")]
 struct Cli {
-    #[arg(default_value = ".")]
+    #[arg(default_value = DEFAULT_PROJECT_DIR)]
     project: PathBuf,
     #[arg(long)]
     force: bool,
@@ -202,7 +203,7 @@ fn download_converters(root: &Path, release_api_url: &str, version: &str) -> Res
     }
 
     let assets = release_asset_map(&release.assets)?;
-    let converter_dir = root.join("Converter");
+    let converter_dir = root.join("converter");
     fs::create_dir_all(&converter_dir).with_context(|| {
         format!(
             "failed to create converter directory: {}",
@@ -343,6 +344,12 @@ mod tests {
     fn rejects_mismatched_sha256() {
         let result = verify_sha256(b"master-data", &"0".repeat(64));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn defaults_to_kebab_case_project_directory() {
+        let cli = Cli::parse_from(["MasterDataInit"]);
+        assert_eq!(cli.project, PathBuf::from(DEFAULT_PROJECT_DIR));
     }
 
     #[test]
