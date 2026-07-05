@@ -213,7 +213,7 @@ converter は現在のディレクトリから上方向に `project-settings.yam
 
 ```yaml
 tool:
-  version: 0.1.5
+  version: 0.1.6
 
 csharp:
   namespace: Game.MasterData
