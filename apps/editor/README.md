@@ -14,7 +14,29 @@ Key editing.
 
 ```bash
 npm install
-npm run tauri dev
+npm run tauri:dev
+```
+
+Development builds use a separate app identity:
+
+```text
+MasterData Editor Dev
+com.kamahir0.masterdata.editor.dev
+```
+
+This keeps the development app, WebView data, and editor preferences separate
+from an installed production `MasterData Editor`.
+
+To build the production desktop app explicitly:
+
+```bash
+npm run tauri:build
+```
+
+To build the development desktop app explicitly:
+
+```bash
+npm run tauri:build:dev
 ```
 
 ## Unsigned macOS Build

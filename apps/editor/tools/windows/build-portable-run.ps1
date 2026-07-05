@@ -19,7 +19,7 @@ if (-not (Test-Path (Join-Path $AppRoot "node_modules"))) {
     npm install
 }
 
-npm run tauri build
+npm run tauri:build:dev
 
 $Exe = Get-ChildItem -Path $ReleaseDir -Filter "*.exe" -File |
     Where-Object { $_.Name -notlike "*setup*" -and $_.Name -notlike "*installer*" } |

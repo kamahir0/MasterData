@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem};
-use tauri::{AppHandle, Emitter, LogicalPosition, Window};
+use tauri::{AppHandle, Emitter, LogicalPosition, Manager, State, Window};
 
 const MENU_OPEN_PROJECT: &str = "file_open_project";
 const MENU_NEW_PROJECT: &str = "file_new_project";
@@ -32,6 +32,7 @@ const EVENT_TABLE_CREATE_ENTRY: &str = "table-create-entry";
 const EVENT_TABLE_COLUMN_ACTION: &str = "table-column-action";
 const EVENT_TABLE_RECORD_ACTION: &str = "table-record-action";
 const EVENT_APP_EXIT_REQUESTED: &str = "app-exit-requested";
+const PRODUCTION_IDENTIFIER: &str = "com.kamahir0.masterdata.editor";
 
 static ALLOW_APP_EXIT: AtomicBool = AtomicBool::new(false);
 
@@ -142,6 +143,12 @@ struct EditorPreferences {
     bottom_panel_visible: bool,
     bottom_panel_height: u32,
     bottom_panel_active_tab: String,
+}
+
+#[derive(Debug, Clone)]
+struct AppPaths {
+    preferences_path: PathBuf,
+    legacy_preferences_path: Option<PathBuf>,
 }
 
 impl Default for EditorPreferences {
@@ -764,9 +771,15 @@ fn write_sidecar(
 }
 
 #[tauri::command]
-fn get_preferences() -> Result<EditorPreferences, String> {
-    let path = preferences_path().map_err(to_string)?;
+fn get_preferences(paths: State<'_, AppPaths>) -> Result<EditorPreferences, String> {
+    let path = &paths.preferences_path;
     if !path.exists() {
+        if let Some(legacy_path) = &paths.legacy_preferences_path {
+            if legacy_path.exists() {
+                let text = fs::read_to_string(legacy_path).map_err(to_string)?;
+                return serde_json::from_str(&text).map_err(to_string);
+            }
+        }
         return Ok(EditorPreferences::default());
     }
     let text = fs::read_to_string(path).map_err(to_string)?;
@@ -774,8 +787,11 @@ fn get_preferences() -> Result<EditorPreferences, String> {
 }
 
 #[tauri::command]
-fn save_preferences(preferences: EditorPreferences) -> Result<(), String> {
-    let path = preferences_path().map_err(to_string)?;
+fn save_preferences(
+    preferences: EditorPreferences,
+    paths: State<'_, AppPaths>,
+) -> Result<(), String> {
+    let path = &paths.preferences_path;
     let text = serde_json::to_vec_pretty(&preferences).map_err(to_string)?;
     atomic_write(&path, &text).map_err(to_string)
 }
@@ -783,6 +799,12 @@ fn save_preferences(preferences: EditorPreferences) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let app_paths = app_paths_from_identifier(&app.config().identifier)
+                .expect("failed to resolve MasterData editor app paths");
+            app.manage(app_paths);
+            Ok(())
+        })
         .menu(|app| {
             let menu = Menu::default(app)?;
             let new_project = MenuItem::with_id(
@@ -1285,12 +1307,31 @@ fn modified_millis(path: &Path) -> u128 {
         .unwrap_or_default()
 }
 
-fn preferences_path() -> Result<PathBuf> {
-    let dirs = ProjectDirs::from("com", "kamahir0", "MasterDataEditor")
-        .with_context(|| "failed to resolve app config directory")?;
+fn app_paths_from_identifier(identifier: &str) -> Result<AppPaths> {
+    let preferences_path = preferences_path_from_identifier(identifier)?;
+    let legacy_preferences_path = if identifier == PRODUCTION_IDENTIFIER {
+        Some(legacy_preferences_path()?)
+    } else {
+        None
+    };
+    Ok(AppPaths {
+        preferences_path,
+        legacy_preferences_path,
+    })
+}
+
+fn preferences_path_from_identifier(identifier: &str) -> Result<PathBuf> {
+    let dirs = ProjectDirs::from_path(PathBuf::from(identifier))
+        .with_context(|| format!("failed to resolve app config directory for {identifier}"))?;
     let dir = dirs.config_dir();
     fs::create_dir_all(dir)?;
     Ok(dir.join("preferences.json"))
+}
+
+fn legacy_preferences_path() -> Result<PathBuf> {
+    let dirs = ProjectDirs::from("com", "kamahir0", "MasterDataEditor")
+        .with_context(|| "failed to resolve legacy app config directory")?;
+    Ok(dirs.config_dir().join("preferences.json"))
 }
 
 fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {

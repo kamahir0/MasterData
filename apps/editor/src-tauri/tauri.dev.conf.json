@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MasterData Editor Dev",
+  "identifier": "com.kamahir0.masterdata.editor.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "MasterData Editor Dev",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1360,
+        "minHeight": 680
+      }
+    ]
+  }
+}

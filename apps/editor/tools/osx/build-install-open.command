@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$APP_ROOT/../.." && pwd)"
+APP_NAME="MasterData Editor Dev"
 APP_TARGET_DIR="$WORKSPACE_ROOT/target/release/bundle/macos"
 
 cd "$APP_ROOT"
@@ -26,11 +27,11 @@ if [ ! -d "$APP_ROOT/node_modules" ]; then
   npm install
 fi
 
-npm run tauri build
+npm run tauri:build:dev
 
-APP_BUNDLE="$(find "$APP_TARGET_DIR" -maxdepth 1 -name '*.app' -type d | sort | head -n 1)"
-if [ -z "$APP_BUNDLE" ]; then
-  echo "Built .app bundle was not found under $APP_TARGET_DIR" >&2
+APP_BUNDLE="$APP_TARGET_DIR/$APP_NAME.app"
+if [ ! -d "$APP_BUNDLE" ]; then
+  echo "Built .app bundle was not found: $APP_BUNDLE" >&2
   exit 1
 fi
 
