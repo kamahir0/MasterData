@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 const DEFAULT_RELEASE_API_URL: &str =
     "https://api.github.com/repos/kamahir0/MasterData/releases/tags";
 const GITHUB_API_VERSION: &str = "2026-03-10";
-const DEFAULT_PROJECT_DIR: &str = "master-data";
 
 const CONVERTER_ASSETS: &[(&str, &str)] = &[
     ("windows-x64", "MasterDataConverter-windows-x64.exe"),
@@ -30,8 +29,8 @@ const CONVERTER_ASSETS: &[(&str, &str)] = &[
 #[command(name = "MasterDataInit")]
 #[command(about = "MasterData project initializer")]
 struct Cli {
-    #[arg(default_value = DEFAULT_PROJECT_DIR)]
-    project: PathBuf,
+    #[arg(value_name = "PROJECT_DIR")]
+    project: Option<PathBuf>,
     #[arg(long)]
     force: bool,
     #[arg(long)]
@@ -58,7 +57,8 @@ struct GitHubReleaseAsset {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let root = resolve_target(&cli.project)?;
+    let root = resolve_target(cli.project.as_deref())?;
+    println!("Project root: {}", root.display());
     let config = prompt_config(cli.yes || !io::stdin().is_terminal())?;
 
     init_project(
@@ -70,6 +70,7 @@ fn main() -> Result<()> {
         },
     )?;
     println!("initialized {}", root.display());
+    println!("MasterDataInit is only needed for bootstrap. You can delete this binary.");
 
     if cli.no_download {
         println!("converter download skipped");
@@ -81,13 +82,21 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn resolve_target(project: &Path) -> Result<PathBuf> {
-    let start = if project.is_absolute() {
-        project.to_path_buf()
+fn resolve_target(project: Option<&Path>) -> Result<PathBuf> {
+    let start = if let Some(project) = project {
+        if project.is_absolute() {
+            project.to_path_buf()
+        } else {
+            env::current_dir()
+                .with_context(|| "failed to get current directory")?
+                .join(project)
+        }
     } else {
-        env::current_dir()
-            .with_context(|| "failed to get current directory")?
-            .join(project)
+        env::current_exe()
+            .with_context(|| "failed to get init binary path")?
+            .parent()
+            .with_context(|| "failed to get init binary directory")?
+            .to_path_buf()
     };
 
     if start.exists() {
@@ -347,9 +356,26 @@ mod tests {
     }
 
     #[test]
-    fn defaults_to_kebab_case_project_directory() {
+    fn project_directory_is_optional() {
         let cli = Cli::parse_from(["MasterDataInit"]);
-        assert_eq!(cli.project, PathBuf::from(DEFAULT_PROJECT_DIR));
+        assert_eq!(cli.project, None);
+    }
+
+    #[test]
+    fn accepts_explicit_project_directory() {
+        let cli = Cli::parse_from(["MasterDataInit", "./master-data"]);
+        assert_eq!(cli.project, Some(PathBuf::from("./master-data")));
+    }
+
+    #[test]
+    fn omitted_project_resolves_to_init_binary_directory() {
+        let expected = env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .canonicalize()
+            .unwrap();
+        assert_eq!(resolve_target(None).unwrap(), expected);
     }
 
     #[test]
