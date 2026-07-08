@@ -6,12 +6,14 @@ import {
   FolderOpen,
   History,
   Hammer,
+  MoreHorizontal,
   PanelBottom,
   PanelLeft,
   Play,
   Redo2,
   RotateCcw,
   Save,
+  SaveAll,
   Settings,
   SlidersHorizontal,
   Sparkles,
@@ -22,9 +24,9 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { ask, open } from "@tauri-apps/plugin-dialog";
+import { message, open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditorStore } from "../store";
 import { BottomPanel, StatusStrip } from "./BottomPanel";
 import { EditorHost } from "./EditorHost";
@@ -33,9 +35,12 @@ import { FileExplorer } from "./FileExplorer";
 const BASE_GRID_ROW_HEIGHT = 34;
 const BASE_GRID_HEADER_HEIGHT = 92;
 const BASE_GRID_INPUT_HEIGHT = 26;
+type UnsavedChangesAction = "saveAll" | "discard" | "cancel";
 
 export function AppShell() {
   const allowCloseRef = useRef(false);
+  const overflowRef = useRef<HTMLDivElement>(null);
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const {
     activePath,
     activeView,
@@ -58,6 +63,7 @@ export function AppShell() {
     recentProjects,
     removeRecentProject,
     saveActive,
+    saveAll,
     setBottomPanelVisible,
     setActiveView,
     setSidebarVisible,
@@ -72,6 +78,7 @@ export function AppShell() {
   const canSave =
     activeView === "projectSettings" ? projectSettingsDirty : activeView === "document" && Boolean(activePath && dirty[activePath]);
   const hasUnsavedChanges = projectSettingsDirty || Object.values(dirty).some(Boolean);
+  const canSaveAll = hasUnsavedChanges;
 
   const chooseProjectSettingsFile = useCallback(async () => {
     try {
@@ -108,25 +115,32 @@ export function AppShell() {
     }
   }, [createProject]);
 
-  const confirmDiscardUnsavedChanges = useCallback(async () => {
-    if (!hasUnsavedChanges) return true;
+  const chooseUnsavedChangesAction = useCallback(async (): Promise<UnsavedChangesAction> => {
+    if (!hasUnsavedChanges) return "discard";
     if ("__TAURI_INTERNALS__" in window) {
-      return ask("Discard unsaved changes?", {
+      const result = await message("Save all changes before closing?", {
         title: "Unsaved Changes",
         kind: "warning",
-        okLabel: "Discard",
-        cancelLabel: "Cancel"
+        buttons: {
+          yes: "Save All",
+          no: "Discard",
+          cancel: "Cancel"
+        }
       });
+      if (result === "Save All") return "saveAll";
+      if (result === "Discard") return "discard";
+      return "cancel";
     }
-    return window.confirm("Discard unsaved changes?");
+    return window.confirm("Discard unsaved changes?") ? "discard" : "cancel";
   }, [hasUnsavedChanges]);
 
   const closeCurrentProject = useCallback(async () => {
     if (!project) return;
-    const discard = await confirmDiscardUnsavedChanges();
-    if (!discard) return;
+    const action = await chooseUnsavedChangesAction();
+    if (action === "cancel") return;
+    if (action === "saveAll" && !(await saveAll())) return;
     closeProject();
-  }, [closeProject, confirmDiscardUnsavedChanges, project]);
+  }, [chooseUnsavedChangesAction, closeProject, project, saveAll]);
 
   const requestApplicationExit = useCallback(async () => {
     allowCloseRef.current = true;
@@ -186,15 +200,27 @@ export function AppShell() {
     if (!("__TAURI_INTERNALS__" in window)) return;
     let unlisten: (() => void) | undefined;
     void listen("app-exit-requested", async () => {
-      const discard = await confirmDiscardUnsavedChanges();
-      if (!discard) return;
+      const action = await chooseUnsavedChangesAction();
+      if (action === "cancel") return;
+      if (action === "saveAll" && !(await saveAll())) return;
       allowCloseRef.current = true;
       await invoke("request_app_exit");
     }).then((dispose) => {
       unlisten = dispose;
     });
     return () => unlisten?.();
-  }, [confirmDiscardUnsavedChanges]);
+  }, [chooseUnsavedChangesAction, saveAll]);
+
+  useEffect(() => {
+    if (!overflowOpen) return;
+    const closeOverflow = (event: PointerEvent) => {
+      if (!overflowRef.current?.contains(event.target as Node)) {
+        setOverflowOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", closeOverflow);
+    return () => window.removeEventListener("pointerdown", closeOverflow);
+  }, [overflowOpen]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -218,13 +244,9 @@ export function AppShell() {
         const dirtyDocuments = Object.values(state.dirty).some(Boolean);
         if (!state.projectSettingsDirty && !dirtyDocuments) return;
         event.preventDefault();
-        const discard = await ask("Discard unsaved changes?", {
-          title: "Unsaved Changes",
-          kind: "warning",
-          okLabel: "Discard",
-          cancelLabel: "Cancel"
-        });
-        if (!discard) return;
+        const action = await chooseUnsavedChangesAction();
+        if (action === "cancel") return;
+        if (action === "saveAll" && !(await saveAll())) return;
         await requestApplicationExit();
       })
       .then((dispose) => {
@@ -234,7 +256,7 @@ export function AppShell() {
         unlisten = undefined;
       });
     return () => unlisten?.();
-  }, [requestApplicationExit]);
+  }, [chooseUnsavedChangesAction, requestApplicationExit, saveAll]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -253,7 +275,8 @@ export function AppShell() {
       }
       if (event.key.toLowerCase() === "s") {
         event.preventDefault();
-        void saveActive();
+        if (event.shiftKey) void saveAll();
+        else void saveActive();
       }
       if (event.key === "=" || event.key === "+") {
         event.preventDefault();
@@ -270,7 +293,7 @@ export function AppShell() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [redo, saveActive, setZoom, undo, zoom]);
+  }, [redo, saveActive, saveAll, setZoom, undo, zoom]);
 
   return (
     <div
@@ -298,29 +321,130 @@ export function AppShell() {
           <span>MasterData Editor</span>
         </div>
         <div className="toolbar">
-          <IconButton label="Undo" onClick={() => void undo()} icon={<Undo2 size={16} />} />
-          <IconButton label="Redo" onClick={() => void redo()} icon={<Redo2 size={16} />} />
-          <IconButton label="Save" onClick={() => void saveActive()} disabled={!canSave} icon={<Save size={16} />} />
-          <IconButton label="Validate" onClick={() => void validate()} icon={<CheckCircle2 size={16} />} />
-          <IconButton label="Generate" onClick={() => void generate()} icon={<Sparkles size={16} />} />
-          <IconButton label="Build" onClick={() => void build()} icon={<Hammer size={16} />} />
-          <IconButton label="Sync" onClick={() => void sync()} icon={<Play size={16} />} />
-          <IconButton label="Clean" onClick={() => void clean()} icon={<RotateCcw size={16} />} />
-          <IconButton
-            label="Project Settings"
-            onClick={() => setActiveView("projectSettings")}
-            disabled={!project}
-            icon={<SlidersHorizontal size={16} />}
-          />
-          <IconButton label="Editor Settings" onClick={() => setActiveView("editorSettings")} icon={<Settings size={16} />} />
-          <IconButton label="Zoom out" onClick={() => setZoom(zoom - 0.1)} icon={<ZoomOut size={16} />} />
-          <span className="zoom-label">{Math.round(zoom * 100)}%</span>
-          <IconButton label="Zoom in" onClick={() => setZoom(zoom + 0.1)} icon={<ZoomIn size={16} />} />
-          <IconButton
-            label={bottomPanelVisible ? "Hide Panel" : "Show Panel"}
-            onClick={() => setBottomPanelVisible(!bottomPanelVisible)}
-            icon={<PanelBottom size={16} />}
-          />
+          <div className="toolbar-group primary-command-group">
+            <CommandButton label="Save" onClick={() => void saveActive()} disabled={!canSave} icon={<Save size={16} />} />
+            <CommandButton
+              label="Save All"
+              onClick={() => void saveAll()}
+              disabled={!canSaveAll}
+              icon={<SaveAll size={16} />}
+              className="save-all-command"
+            />
+          </div>
+          <div className="toolbar-separator" />
+          <div className="toolbar-group build-command-group">
+            <CommandButton
+              label="Validate"
+              onClick={() => void validate()}
+              disabled={!project}
+              icon={<CheckCircle2 size={16} />}
+              className="optional-command validate-command"
+            />
+            <CommandButton label="Build" onClick={() => void build()} disabled={!project} icon={<Hammer size={16} />} />
+            <CommandButton
+              label="Sync"
+              onClick={() => void sync()}
+              disabled={!project}
+              icon={<Play size={16} />}
+              className="optional-command sync-command"
+            />
+          </div>
+          <div className="toolbar-separator optional-separator" />
+          <div className="toolbar-group edit-command-group">
+            <IconButton label="Undo" onClick={() => void undo()} icon={<Undo2 size={16} />} />
+            <IconButton label="Redo" onClick={() => void redo()} icon={<Redo2 size={16} />} />
+          </div>
+          <div className="toolbar-separator view-separator" />
+          <div className="toolbar-group view-command-group">
+            <IconButton
+              label="Project Settings"
+              onClick={() => setActiveView("projectSettings")}
+              disabled={!project}
+              icon={<SlidersHorizontal size={16} />}
+            />
+            <IconButton label="Editor Settings" onClick={() => setActiveView("editorSettings")} icon={<Settings size={16} />} />
+            <IconButton label="Zoom out" onClick={() => setZoom(zoom - 0.1)} icon={<ZoomOut size={16} />} />
+            <span className="zoom-label">{Math.round(zoom * 100)}%</span>
+            <IconButton label="Zoom in" onClick={() => setZoom(zoom + 0.1)} icon={<ZoomIn size={16} />} />
+            <IconButton
+              label={bottomPanelVisible ? "Hide Panel" : "Show Panel"}
+              onClick={() => setBottomPanelVisible(!bottomPanelVisible)}
+              icon={<PanelBottom size={16} />}
+            />
+          </div>
+          <div className="toolbar-overflow" ref={overflowRef}>
+            <IconButton
+              label="More commands"
+              onClick={() => setOverflowOpen(!overflowOpen)}
+              icon={<MoreHorizontal size={16} />}
+            />
+            {overflowOpen && (
+              <div className="toolbar-overflow-menu">
+                <OverflowButton
+                  label="Validate"
+                  disabled={!project}
+                  icon={<CheckCircle2 size={15} />}
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    void validate();
+                  }}
+                />
+                <OverflowButton
+                  label="Sync"
+                  disabled={!project}
+                  icon={<Play size={15} />}
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    void sync();
+                  }}
+                />
+                <OverflowButton
+                  label="Generate"
+                  disabled={!project}
+                  icon={<Sparkles size={15} />}
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    void generate();
+                  }}
+                />
+                <OverflowButton
+                  label="Clean"
+                  disabled={!project}
+                  icon={<RotateCcw size={15} />}
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    void clean();
+                  }}
+                />
+                <div className="overflow-separator" />
+                <OverflowButton
+                  label="Project Settings"
+                  disabled={!project}
+                  icon={<SlidersHorizontal size={15} />}
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    setActiveView("projectSettings");
+                  }}
+                />
+                <OverflowButton
+                  label="Editor Settings"
+                  icon={<Settings size={15} />}
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    setActiveView("editorSettings");
+                  }}
+                />
+                <OverflowButton
+                  label={bottomPanelVisible ? "Hide Panel" : "Show Panel"}
+                  icon={<PanelBottom size={15} />}
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    setBottomPanelVisible(!bottomPanelVisible);
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </header>
       <div className={error ? "error-strip" : "error-strip empty"}>
@@ -362,6 +486,47 @@ function isEditableElement(target: EventTarget | null) {
 }
 
 export function IconButton({
+  className,
+  disabled,
+  icon,
+  label,
+  onClick
+}: {
+  className?: string;
+  disabled?: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button className={`icon-button${className ? ` ${className}` : ""}`} title={label} aria-label={label} disabled={disabled} onClick={onClick}>
+      {icon}
+    </button>
+  );
+}
+
+function CommandButton({
+  className,
+  disabled,
+  icon,
+  label,
+  onClick
+}: {
+  className?: string;
+  disabled?: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button className={`command-button${className ? ` ${className}` : ""}`} title={label} disabled={disabled} onClick={onClick}>
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function OverflowButton({
   disabled,
   icon,
   label,
@@ -373,8 +538,15 @@ export function IconButton({
   onClick: () => void;
 }) {
   return (
-    <button className="icon-button" title={label} disabled={disabled} onClick={onClick}>
+    <button
+      className="overflow-button"
+      disabled={disabled}
+      onClick={() => {
+        onClick();
+      }}
+    >
       {icon}
+      <span>{label}</span>
     </button>
   );
 }

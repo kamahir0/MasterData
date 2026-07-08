@@ -98,6 +98,7 @@ interface EditorState {
   duplicateEntry: (from: string, to: string) => Promise<void>;
   deleteEntry: (relativePath: string) => Promise<void>;
   saveActive: () => Promise<void>;
+  saveAll: () => Promise<boolean>;
   validate: () => Promise<void>;
   build: () => Promise<void>;
   generate: () => Promise<void>;
@@ -525,6 +526,62 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({ isBusy: false });
     }
   },
+  async saveAll() {
+    const project = get().project;
+    if (!project) return true;
+
+    const dirtyPaths = Object.entries(get().dirty)
+      .filter(([, isDirty]) => isDirty)
+      .map(([path]) => path)
+      .sort();
+    const documentsToSave = dirtyPaths
+      .map((path) => [path, get().documents[path]] as const)
+      .filter(([, document]) => Boolean(document));
+    const config = get().projectSettingsDirty ? get().projectSettingsDraft : undefined;
+
+    if (documentsToSave.length === 0 && !config) return true;
+
+    set({ isBusy: true, error: undefined });
+    try {
+      for (const [path, document] of documentsToSave) {
+        const saved = await api.saveDefinition(project.root, path, document.definition);
+        set((state) => ({
+          documents: { ...state.documents, [path]: saved },
+          dirty: { ...state.dirty, [path]: false },
+          buildLog: [...state.buildLog, `Saved ${path}`]
+        }));
+      }
+
+      if (config) {
+        const nextProject = await api.saveProjectSettings(project.root, config);
+        const nextDocuments = Object.fromEntries(nextProject.documents.map((doc) => [doc.relativePath, doc]));
+        set((state) => ({
+          project: nextProject,
+          projectSettingsDraft: cloneConfig(nextProject.config),
+          projectSettingsDirty: false,
+          documents: mergeCleanDocuments(state.documents, nextDocuments, state.dirty),
+          diagnostics: nextProject.diagnostics,
+          activePath: state.activePath && nextDocuments[state.activePath] ? state.activePath : nextProject.documents[0]?.relativePath,
+          buildLog: [...state.buildLog, "Saved project-settings.yaml"]
+        }));
+      }
+
+      set((state) => ({
+        buildLog: [...state.buildLog, "Saved all changes"]
+      }));
+      return true;
+    } catch (error) {
+      set((state) => ({
+        error: String(error),
+        buildLog: [...state.buildLog, `Save all: ${String(error)}`],
+        bottomPanelVisible: true,
+        bottomPanelActiveTab: "buildLog"
+      }));
+      return false;
+    } finally {
+      set({ isBusy: false });
+    }
+  },
   async validate() {
     const project = get().project;
     if (!project) return;
@@ -792,6 +849,19 @@ function mergeRecentProjects(projectRoot: string, previous: string[]) {
 
 function cloneConfig(config: MasterDataConfig): MasterDataConfig {
   return JSON.parse(JSON.stringify(config)) as MasterDataConfig;
+}
+
+function mergeCleanDocuments(
+  currentDocuments: Record<string, DefinitionDocument>,
+  savedDocuments: Record<string, DefinitionDocument>,
+  dirty: Record<string, boolean>
+) {
+  return Object.fromEntries(
+    Object.entries(savedDocuments).map(([path, document]) => [
+      path,
+      dirty[path] ? currentDocuments[path] ?? document : document
+    ])
+  );
 }
 
 function createDefaultDefinition(kind: "table" | "enum" | "struct", path: string): Definition {
